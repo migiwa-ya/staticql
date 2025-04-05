@@ -1,0 +1,52 @@
+{
+  "name": "staticql",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./cli": "./cli/bin.js"
+  },
+  "bin": {
+    "staticql": "cli/bin.js"
+  },
+  "files": [
+    "dist",
+    "cli",
+    "!**/*.test.*"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest"
+  },
+  "keywords": [
+    "staticql",
+    "markdown",
+    "yaml",
+    "static-content",
+    "jamstack",
+    "type-safe",
+    "query"
+  ],
+  "author": "migiwa-ya",
+  "license": "MIT",
+  "description": "Type-safe query engine for Markdown/YAML/JSON-based static content.",
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.14.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.1"
+  },
+  "dependencies": {
+    "globby": "^14.1.0",
+    "gray-matter": "^4.0.3",
+    "js-yaml": "^4.1.0",
+    "zod": "^3.24.2"
+  }
+}

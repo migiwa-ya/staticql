@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.cache/
+
+public/index/
+tests/output/
+tests/temp-index/
+
+.DS_Store
+.vscode/
+.idea/
+*.log
