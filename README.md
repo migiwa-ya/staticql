@@ -72,13 +72,13 @@ export default defineContentDB({
 ## CLI の使い方
 
 ```bash
-npx staticql generate [configPath] [outputDir]
+npx staticql-gen [configPath] [outputDir]
 ```
 
 例：
 
 ```bash
-npx staticql generate staticql.config.ts public/index/
+npx staticql-gen staticql.config.ts public/index/
 ```
 
 ## 実行例（Node.js）

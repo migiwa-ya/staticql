@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .cache/
+.npm/
 
 public/index/
 tests/output/

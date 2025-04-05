@@ -1,6 +1,6 @@
 {
-  "name": "staticql",
-  "version": "1.0.0",
+  "name": "@migiwa-ya/staticql",
+  "version": "0.1.0",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -10,10 +10,10 @@
       "require": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
-    "./cli": "./cli/bin.js"
+    "./cli": "./dist/cli/generate.js"
   },
   "bin": {
-    "staticql": "cli/bin.js"
+    "staticql-gen": "dist/cli/generate.js"
   },
   "files": [
     "dist",
@@ -33,7 +33,17 @@
     "type-safe",
     "query"
   ],
-  "author": "migiwa-ya",
+  "author": {
+    "name": "migiwa-ya",
+    "url": "https://github.com/migiwa-ya"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/migiwa-ya/staticql.git"
+  },
+  "bugs": {
+    "url": "https://github.com/migiwa-ya/staticql/issues"
+  },
   "license": "MIT",
   "description": "Type-safe query engine for Markdown/YAML/JSON-based static content.",
   "devDependencies": {
