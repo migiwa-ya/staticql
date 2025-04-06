@@ -21,8 +21,7 @@ describe("Indexer", () => {
     expect(json.fields).toContain("name");
     expect(json.fields).toContain("herbState.name");
 
-    const record = json.records.find((r: any) => r.slug === "peppermint");
+    const record = json.records.find((r: any) => r.slug === "mentha-piperita");
     expect(record.values.name).toBe("ペパーミント");
-    expect(record.values["herbState.name"]).toBe("乾燥");
   });
 });

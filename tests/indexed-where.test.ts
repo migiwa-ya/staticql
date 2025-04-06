@@ -16,7 +16,7 @@ describe("QueryBuilder with index optimization", () => {
       .exec();
 
     expect(result.length).toBe(1);
-    expect(result[0].slug).toBe("peppermint");
+    expect(result[0].slug).toBe("mentha-piperita");
   });
 
   it("should find herbs by partial match using contains", async () => {
@@ -38,18 +38,18 @@ describe("QueryBuilder with index optimization", () => {
       .exec();
 
     expect(result.length).toBeGreaterThan(0);
-    expect(result[0].herbState.name).toBe("乾燥");
+    expect(result[0].herbState[0].name).toBe("乾燥");
   });
 
   it("should filter reports by joined herb name", async () => {
     const result = await db
       .from("reports")
-      .join("herb")
-      .where("herb.name", "eq", "ペパーミント")
+      .join("herbs")
+      .where("herbs.name", "eq", "ペパーミント")
       .exec();
 
-    expect(result.length).toBe(1);
-    expect(result[0].slug).toBe("report-001");
-    expect(result[0].herb.slug).toBe("peppermint");
+    expect(result.length).toBe(2);
+    expect(result[0].slug).toBe("reportGroup001--002");
+    expect(result[0].herbs[0].slug).toBe("mentha-piperita");
   });
 });

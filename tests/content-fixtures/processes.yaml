@@ -1,0 +1,23 @@
+- slug: infusion
+  name: ハーブティー
+  description: ハーブをお湯で抽出して成分を取り出す方法。主に葉や花に使用される。
+
+- slug: tincture
+  name: チンキ
+  description: アルコールにハーブを浸けて成分を抽出する方法。保存性が高い。
+
+- slug: decoction
+  name: 煎じ薬
+  description: 根や茎など硬い部分を煮出して成分を抽出する方法。
+
+- slug: salve
+  name: 軟膏
+  description: ハーブを油やワックスで抽出して塗布用に加工する。
+
+- slug: distillation
+  name: 蒸留
+  description: 水蒸気などで精油や芳香成分を抽出する方法。
+
+- slug: powder
+  name: 粉末
+  description: ハーブを乾燥させて粉状にする処理法。カプセルなどにも使用される。

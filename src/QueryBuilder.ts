@@ -49,9 +49,6 @@ export class QueryBuilder {
 
   async exec(): Promise<any[]> {
     const sourceDef = this.config.sources[this.sourceName];
-    if (!sourceDef) {
-      console.log(this.config.sources);
-    }
     const indexableFields = new Set(sourceDef.index ?? []);
     const indexMode: indexMode = this.optionsData?.indexMode ?? "only";
 
@@ -126,7 +123,11 @@ export class QueryBuilder {
 
         result = result.map((row) => ({
           ...row,
-          [key]: foreignMap.get(row[rel.localKey]) ?? null,
+          [key]:
+            this.resolveField(row, rel.localKey)
+              ?.split(" ")
+              .map((key) => foreignMap.get(key))
+              .filter((v) => v) ?? null,
         }));
       }
     }
@@ -143,5 +144,23 @@ export class QueryBuilder {
     }
 
     return result;
+  }
+
+  private resolveField(obj: any, fieldPath: string): string | undefined {
+    const segments = fieldPath.split(".");
+    let value: any = obj;
+
+    for (const seg of segments) {
+      if (Array.isArray(value)) {
+        value = value.map((v) => v?.[seg]);
+      } else {
+        value = value?.[seg];
+      }
+
+      if (value == null) return undefined;
+    }
+
+    if (Array.isArray(value)) return value.join(" ");
+    return String(value);
   }
 }
