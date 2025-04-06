@@ -2,6 +2,11 @@ import path from "path";
 import fs from "fs/promises";
 import { DataLoader } from "./DataLoader";
 import { ContentDBConfig } from "./types";
+import {
+  resolveField,
+  unwrapSingleArray,
+  findEntriesByPartialKey,
+} from "./utils";
 
 export class Indexer {
   private loader: DataLoader;
@@ -29,15 +34,18 @@ export class Indexer {
         const foreignData = await this.loader.load(rel.to);
 
         const foreignMap = new Map(
-          foreignData.map((row) => [row[rel.foreignKey], row])
+          foreignData.map((row) => [resolveField(row, rel.foreignKey), row])
         );
 
         data = data.map((row) => ({
           ...row,
+
           [key]:
-            this.resolveField(row, rel.localKey)
+            resolveField(row, rel.localKey)
               ?.split(" ")
-              .map((key) => foreignMap.get(key))
+              .map((key) =>
+                unwrapSingleArray(findEntriesByPartialKey(foreignMap, key))
+              )
               .filter((v) => v) ?? null,
         }));
       }
@@ -46,7 +54,7 @@ export class Indexer {
         const values: Record<string, string> = {};
 
         for (const field of sourceDef.index!) {
-          const val = this.resolveField(row, field);
+          const val = resolveField(row, field);
           if (val != null && String(val)) {
             values[field] = String(val);
           }
@@ -84,23 +92,5 @@ export class Indexer {
         "utf-8"
       );
     }
-  }
-
-  private resolveField(obj: any, fieldPath: string): string | undefined {
-    const segments = fieldPath.split(".");
-    let value: any = obj;
-
-    for (const seg of segments) {
-      if (Array.isArray(value)) {
-        value = value.map((v) => v?.[seg]);
-      } else {
-        value = value?.[seg];
-      }
-
-      if (value == null) return undefined;
-    }
-
-    if (Array.isArray(value)) return value.join(" ");
-    return String(value);
   }
 }

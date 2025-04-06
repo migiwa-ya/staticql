@@ -1,6 +1,11 @@
 import type { DataLoader } from "./DataLoader";
 import type { ContentDBConfig } from "./types";
 import { Indexer } from "./Indexer";
+import {
+  resolveField,
+  unwrapSingleArray,
+  findEntriesByPartialKey,
+} from "./utils";
 
 type Operator = "eq" | "contains";
 
@@ -117,16 +122,19 @@ export class QueryBuilder {
         if (!rel) throw new Error(`Unknown relation: ${key}`);
 
         const foreignData = await this.loader.load(rel.to);
+
         const foreignMap = new Map(
-          foreignData.map((row) => [row[rel.foreignKey], row])
+          foreignData.map((row) => [resolveField(row, rel.foreignKey), row])
         );
 
         result = result.map((row) => ({
           ...row,
           [key]:
-            this.resolveField(row, rel.localKey)
+            resolveField(row, rel.localKey)
               ?.split(" ")
-              .map((key) => foreignMap.get(key))
+              .map((key) =>
+                unwrapSingleArray(findEntriesByPartialKey(foreignMap, key))
+              )
               .filter((v) => v) ?? null,
         }));
       }
@@ -144,23 +152,5 @@ export class QueryBuilder {
     }
 
     return result;
-  }
-
-  private resolveField(obj: any, fieldPath: string): string | undefined {
-    const segments = fieldPath.split(".");
-    let value: any = obj;
-
-    for (const seg of segments) {
-      if (Array.isArray(value)) {
-        value = value.map((v) => v?.[seg]);
-      } else {
-        value = value?.[seg];
-      }
-
-      if (value == null) return undefined;
-    }
-
-    if (Array.isArray(value)) return value.join(" ");
-    return String(value);
   }
 }
