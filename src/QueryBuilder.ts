@@ -1,11 +1,11 @@
-import type { DataLoader } from "./DataLoader";
+import type { DataLoader } from "./DataLoader.js";
 import type { ContentDBConfig } from "./types";
-import { Indexer } from "./Indexer";
+import { Indexer } from "./Indexer.js";
 import {
   resolveField,
   unwrapSingleArray,
   findEntriesByPartialKey,
-} from "./utils";
+} from "./utils.js";
 
 type Operator = "eq" | "contains";
 

@@ -1,7 +1,7 @@
-import { DataLoader } from "./DataLoader";
-import { Indexer } from "./Indexer";
-import type { ContentDBConfig } from "./types.ts";
-import { QueryBuilder } from "./QueryBuilder";
+import { DataLoader } from "./DataLoader.js";
+import { Indexer } from "./Indexer.js";
+import type { ContentDBConfig } from "./types";
+import { QueryBuilder } from "./QueryBuilder.js";
 
 export class ContentDB {
   private config: ContentDBConfig;

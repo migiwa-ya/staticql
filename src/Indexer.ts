@@ -1,12 +1,12 @@
 import path from "path";
 import fs from "fs/promises";
-import { DataLoader } from "./DataLoader";
+import { DataLoader } from "./DataLoader.js";
 import { ContentDBConfig } from "./types";
 import {
   resolveField,
   unwrapSingleArray,
   findEntriesByPartialKey,
-} from "./utils";
+} from "./utils.js";
 
 export class Indexer {
   private loader: DataLoader;
