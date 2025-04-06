@@ -34,7 +34,11 @@ export class Indexer {
 
         data = data.map((row) => ({
           ...row,
-          [key]: foreignMap.get(row[rel.localKey]) ?? null,
+          [key]:
+            this.resolveField(row, rel.localKey)
+              ?.split(" ")
+              .map((key) => foreignMap.get(key))
+              .filter((v) => v) ?? null,
         }));
       }
 
@@ -43,7 +47,7 @@ export class Indexer {
 
         for (const field of sourceDef.index!) {
           const val = this.resolveField(row, field);
-          if (val != null) {
+          if (val != null && String(val)) {
             values[field] = String(val);
           }
         }
@@ -87,7 +91,12 @@ export class Indexer {
     let value: any = obj;
 
     for (const seg of segments) {
-      value = value?.[seg];
+      if (Array.isArray(value)) {
+        value = value.map((v) => v?.[seg]);
+      } else {
+        value = value?.[seg];
+      }
+
       if (value == null) return undefined;
     }
 

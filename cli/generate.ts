@@ -30,7 +30,6 @@ async function run() {
 
   try {
     console.log("index.json を生成中...");
-    await db.index();
     await db.saveIndexesTo(outputDir);
     console.log("index.json を生成しました");
   } catch (err) {
