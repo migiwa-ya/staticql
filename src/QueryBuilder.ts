@@ -7,9 +7,11 @@ import {
   findEntriesByPartialKey,
 } from "./utils.js";
 
-type Operator = "eq" | "contains";
+type Operator = "eq" | "contains" | "in";
 
-type Filter = { field: string; op: Operator; value: string };
+type Filter =
+  | { field: string; op: "eq" | "contains"; value: string }
+  | { field: string; op: "in"; value: string[] };
 
 type indexMode = "preferred" | "only" | "first-no-fallback" | "none";
 
@@ -39,8 +41,10 @@ export class QueryBuilder {
     return this;
   }
 
-  where(field: string, op: Operator, value: string): QueryBuilder {
-    this.filters.push({ field, op, value });
+  where(field: string, op: "eq" | "contains", value: string): QueryBuilder;
+  where(field: string, op: "in", value: string[]): QueryBuilder;
+  where(field: string, op: Operator, value: string | string[]): QueryBuilder {
+    this.filters.push({ field, op, value } as Filter);
     return this;
   }
 
@@ -89,6 +93,11 @@ export class QueryBuilder {
             if (v == null) return false;
             if (op === "eq") return v === value;
             if (op === "contains") return v.includes(value);
+            if (op === "in") {
+              if (!Array.isArray(value)) return false;
+              const vs = v.split(" ");
+              return vs.some((item: string) => value.includes(item));
+            }
             return false;
           })
           .map((r) => r.slug);
@@ -147,6 +156,13 @@ export class QueryBuilder {
         if (val == null) return false;
         if (op === "eq") return String(val) === value;
         if (op === "contains") return String(val).includes(value);
+        if (op === "in") {
+          if (!Array.isArray(value)) return false;
+          if (Array.isArray(val)) {
+            return val.some((item) => value.includes(item));
+          }
+          return value.includes(val);
+        }
         return false;
       });
     }

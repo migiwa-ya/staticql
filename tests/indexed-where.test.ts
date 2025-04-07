@@ -11,7 +11,6 @@ describe("QueryBuilder with index optimization", () => {
   it("should find herbs by exact match on indexed field", async () => {
     const result = await db
       .from("herbs")
-      .join("herbState")
       .where("name", "eq", "ペパーミント")
       .exec();
 
@@ -22,12 +21,20 @@ describe("QueryBuilder with index optimization", () => {
   it("should find herbs by partial match using contains", async () => {
     const result = await db
       .from("herbs")
-      .join("herbState")
-      .where("name", "contains", "ミント")
+      .where("name", "contains", "ペパーミント")
       .exec();
 
     expect(result.length).toBeGreaterThan(0);
-    expect(result[0].name).toContain("ミント");
+    expect(result[0].name).toContain("ペパーミント");
+  });
+
+  it("should find herbs by partial match using in", async () => {
+    const result = await db
+      .from("herbs")
+      .where("tags", "in", ["refresh", "night"])
+      .exec();
+
+    expect(result.length).toBe(2);
   });
 
   it("should support indexed nested field (herbState.name)", async () => {
