@@ -65,9 +65,48 @@ async function run() {
     const identifier =
       sourceName[0].toUpperCase() + sourceName.slice(1) + "Record";
 
-    const { node } = zodToTs(schema, identifier);
+    // Generate base type as string
+    let { node } = zodToTs(schema, identifier);
     const typeAlias = createTypeAlias(node, identifier);
-    const nodeString = printNode(typeAlias);
+    let nodeString = printNode(typeAlias);
+
+    // If there are relations, append them to the type string
+    if (sourceDef.relations) {
+      const firstBrace = nodeString.indexOf("{");
+      const lastBrace = nodeString.lastIndexOf("}");
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        let body = nodeString.slice(firstBrace + 1, lastBrace).trim();
+        // Append each relation field
+        for (const [relKey, relDef] of Object.entries(sourceDef.relations)) {
+          let relType: string = "hasOne";
+          if (
+            relDef &&
+            typeof relDef === "object" &&
+            "type" in relDef &&
+            typeof (relDef as any).type === "string"
+          ) {
+            relType = (relDef as any).type;
+          }
+          const targetSource =
+            relDef && typeof relDef === "object" && "to" in relDef
+              ? (relDef as any).to
+              : "unknown";
+          const targetType =
+            targetSource[0].toUpperCase() + targetSource.slice(1) + "Record";
+          let valueType = targetType;
+          if (relType === "hasMany" || relType === "hasManyThrough") {
+            valueType = `${targetType}[]`;
+          }
+          body += `\n  ${relKey}?: ${valueType};`;
+        }
+        nodeString =
+          nodeString.slice(0, firstBrace + 1) +
+          "\n" +
+          body +
+          "\n" +
+          nodeString.slice(lastBrace);
+      }
+    }
     typeDefs += `export ${nodeString}` + "\n\n";
 
     // Index types
@@ -89,6 +128,32 @@ async function run() {
         typeDefs += `  "${metaField}": any;\n`;
       }
       typeDefs += `}>;\n\n`;
+    }
+
+    // Relation record types
+    if (sourceDef.relations) {
+      for (const [relKey, relDef] of Object.entries(sourceDef.relations)) {
+        // Determine relation type safely
+        let relType: string = "hasOne";
+        if (
+          relDef &&
+          typeof relDef === "object" &&
+          "type" in relDef &&
+          typeof (relDef as any).type === "string"
+        ) {
+          relType = (relDef as any).type;
+        }
+
+        let valueType = "string";
+        if (relType === "hasMany" || relType === "hasManyThrough") {
+          valueType = "string[]";
+        }
+
+        typeDefs += `export type ${
+          sourceName[0].toUpperCase() + sourceName.slice(1)
+        }Relation_${relKey} = Record<string, ${valueType}>;\n`;
+      }
+      typeDefs += "\n";
     }
   }
 
