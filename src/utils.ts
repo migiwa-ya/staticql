@@ -21,6 +21,63 @@ export function resolveField(obj: any, fieldPath: string): string | undefined {
   return String(value);
 }
 
+// Returns all primitive values at a given path, flattening arrays
+export function getAllFieldValues(obj: any, fieldPath: string): string[] {
+  const segments = fieldPath.split(".");
+  let values: any[] = [obj];
+
+  for (const seg of segments) {
+    values = values
+      .map((v) => {
+        if (Array.isArray(v)) return v.map((item) => item?.[seg]);
+        return v?.[seg];
+      })
+      .flat()
+      .filter((v) => v !== undefined && v !== null);
+  }
+
+  // Flatten any nested arrays and stringify primitives
+  return values
+    .flat(Infinity)
+    .filter((v) => v !== undefined && v !== null)
+    .map((v) => String(v));
+}
+
+/**
+ * Builds a Map from all possible values at a (possibly array) foreignKey path to their parent object
+ */
+export function buildForeignKeyMap(data: any[], foreignKeyPath: string): Map<string, any> {
+  const map = new Map<string, any>();
+  for (const obj of data) {
+    const values = getAllFieldValues(obj, foreignKeyPath);
+    for (const v of values) {
+      map.set(v, obj);
+    }
+  }
+  return map;
+}
+
+/**
+ * Extracts all values at a nested property path from an object or array of objects.
+ * Returns a flat array of all values found at the path.
+ * Example: extractNestedProperty([{a: {b: 1}}, {a: {b: 2}}], ['a', 'b']) => [1, 2]
+ */
+export function extractNestedProperty(objOrArray: any, path: string[]): any[] {
+  if (!Array.isArray(objOrArray)) objOrArray = [objOrArray];
+  let results: any[] = objOrArray;
+  for (const key of path) {
+    results = results
+      .map((item) => {
+        if (item == null) return [];
+        if (Array.isArray(item)) return item.map((i) => i[key]);
+        return item[key];
+      })
+      .flat();
+  }
+  // Flatten any nested arrays and remove undefined/null
+  return results.flat(Infinity).filter((v) => v !== undefined && v !== null);
+}
+
 export function unwrapSingleArray(value: any) {
   while (Array.isArray(value) && value.length === 1) {
     value = value[0];

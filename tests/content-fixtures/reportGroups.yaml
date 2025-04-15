@@ -1,7 +1,5 @@
 - slug: reportGroup001
-  herbSlugs: [matricaria-chamomilla, mentha-piperita]
-  process: infusion
+  processSlug: infusion
 
 - slug: reportGroup002
-  herbSlugs: [matricaria-chamomilla]
-  process: tincture
+  processSlug: tincture

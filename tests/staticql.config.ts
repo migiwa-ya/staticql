@@ -27,7 +27,8 @@ export default defineContentDB({
           type: "hasMany",
         },
       },
-      index: ["name", "herbState.name", "tags", "reports.reportGroupSlug"],
+      index: ["name", "herbState.name", "reports.reportGroupSlug"],
+      meta: ["name", "tags", "herbState.name", "reports.reportGroupSlug"]
     },
 
     herbStates: {
@@ -72,7 +73,7 @@ export default defineContentDB({
           through: "reportGroups",
           sourceLocalKey: "reportGroupSlug",
           throughForeignKey: "slug",
-          throughLocalKey: "process",
+          throughLocalKey: "processSlug",
           targetForeignKey: "slug",
           type: "hasOneThrough",
         },
@@ -92,11 +93,10 @@ export default defineContentDB({
       schema: z.array(
         z.object({
           slug: z.string(),
-          herbSlugs: z.array(z.string()),
-          process: z.string(),
+          processSlug: z.string(),
         })
       ),
-      index: ["herbSlugs", "process"],
+      index: ["processSlug"],
     },
 
     processes: {
