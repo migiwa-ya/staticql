@@ -1,6 +1,6 @@
-import { z } from 'zod';
+import { z } from "zod";
 
-export type SourceType = 'markdown' | 'yaml' | 'json';
+export type SourceType = "markdown" | "yaml" | "json";
 
 export type SourceConfig = {
   path: string;
@@ -12,11 +12,11 @@ export type SourceConfig = {
 
 export type RelationConfig =
   | {
-      // Direct relation (hasOne, hasMany, belongsTo)
+      // Direct relation (hasOne, hasMany)
       to: string;
       localKey: string;
       foreignKey: string;
-      type?: "hasOne" | "hasMany" | "belongsTo";
+      type?: "hasOne" | "hasMany";
     }
   | {
       // Through relation (hasOneThrough, hasManyThrough)

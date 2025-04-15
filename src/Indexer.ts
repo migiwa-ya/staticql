@@ -42,23 +42,32 @@ export class Indexer {
           // Through relation (hasOneThrough, hasManyThrough)
           const throughData = await this.loader.load(rel.through);
           const throughMap = new Map(
-            throughData.map((row) => [resolveField(row, rel.throughForeignKey) ?? "", row])
+            throughData.map((row) => [
+              resolveField(row, rel.throughForeignKey) ?? "",
+              row,
+            ])
           );
 
           const targetData = await this.loader.load(rel.to);
           const targetMap = new Map(
-            targetData.map((row) => [resolveField(row, rel.targetForeignKey) ?? "", row])
+            targetData.map((row) => [
+              resolveField(row, rel.targetForeignKey) ?? "",
+              row,
+            ])
           );
 
           data = data.map((row) => {
             const sourceKey = resolveField(row, rel.sourceLocalKey);
-            if (!sourceKey) return { ...row, [key]: rel.type === "hasManyThrough" ? [] : null };
+            if (!sourceKey)
+              return {
+                ...row,
+                [key]: rel.type === "hasManyThrough" ? [] : null,
+              };
 
-            const throughMatches = throughData.filter(
-              (t) =>
-                (resolveField(t, rel.throughForeignKey) ?? "")
-                  .split(" ")
-                  .includes(sourceKey)
+            const throughMatches = throughData.filter((t) =>
+              (resolveField(t, rel.throughForeignKey) ?? "")
+                .split(" ")
+                .includes(sourceKey)
             );
 
             const targets = throughMatches
@@ -80,24 +89,38 @@ export class Indexer {
           });
         } else {
           // Type guard for direct relation
-          const directRel = rel as Extract<typeof rel, { localKey: string; foreignKey: string }>;
+          const directRel = rel as Extract<
+            typeof rel,
+            { localKey: string; foreignKey: string }
+          >;
           const foreignData = await this.loader.load(directRel.to);
 
           const foreignMap = new Map(
-            foreignData.map((row) => [resolveField(row, directRel.foreignKey) ?? "", row])
+            foreignData.map((row) => [
+              resolveField(row, directRel.foreignKey) ?? "",
+              row,
+            ])
           );
 
-          data = data.map((row) => ({
-            ...row,
+          data = data.map((row) => {
+            const relType = (directRel as any).type;
+            const localVal = resolveField(row, directRel.localKey) ?? "";
+            const keys = localVal.split(" ").filter(Boolean);
+            const matches = keys
+              .map((k) =>
+                unwrapSingleArray(findEntriesByPartialKey(foreignMap, k))
+              )
+              .filter((v) => v);
 
-            [key]:
-              (resolveField(row, directRel.localKey) ?? "")
-                .split(" ")
-                .map((k) =>
-                  unwrapSingleArray(findEntriesByPartialKey(foreignMap, k))
-                )
-                .filter((v) => v) ?? null,
-          }));
+            if (relType === "hasOne") {
+              return { ...row, [key]: matches.length > 0 ? matches[0] : null };
+            } else if (relType === "hasMany") {
+              return { ...row, [key]: matches };
+            } else {
+              // Default: array for backward compatibility
+              return { ...row, [key]: matches };
+            }
+          });
         }
       }
 

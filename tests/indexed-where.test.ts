@@ -45,7 +45,7 @@ describe("QueryBuilder with index optimization", () => {
       .exec();
 
     expect(result.length).toBeGreaterThan(0);
-    expect(result[0].herbState[0].name).toBe("乾燥");
+    expect(result[0].herbState.name).toBe("乾燥");
   });
 
   it("should filter reports by joined herb name", async () => {

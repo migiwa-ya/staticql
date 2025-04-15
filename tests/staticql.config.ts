@@ -18,11 +18,13 @@ export default defineContentDB({
           to: "herbStates",
           localKey: "herbStateSlug",
           foreignKey: "slug",
+          type: "hasOne",
         },
         reports: {
           to: "reports",
           localKey: "slug",
           foreignKey: "combinedHerbs.slug",
+          type: "hasMany",
         },
       },
       index: ["name", "herbState.name", "tags", "reports.reportGroupSlug"],
@@ -63,6 +65,7 @@ export default defineContentDB({
           to: "herbs",
           localKey: "combinedHerbs.slug",
           foreignKey: "slug",
+          type: "hasMany",
         },
         processThroughReportGroup: {
           to: "processes",
