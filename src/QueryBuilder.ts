@@ -1,10 +1,12 @@
 import type { DataLoader } from "./DataLoader.js";
 import type { ContentDBConfig } from "./types";
 import { Indexer } from "./Indexer.js";
+import fs from "fs/promises";
 import {
   resolveField,
   unwrapSingleArray,
   findEntriesByPartialKey,
+  buildForeignKeyMap,
 } from "./utils.js";
 
 type Operator = "eq" | "contains" | "in";
@@ -13,7 +15,7 @@ type Filter =
   | { field: string; op: "eq" | "contains"; value: string }
   | { field: string; op: "in"; value: string[] };
 
-type indexMode = "preferred" | "only" | "first-no-fallback" | "none";
+type indexMode = "only" | "none";
 
 export class QueryBuilder {
   private sourceName: string;
@@ -21,7 +23,7 @@ export class QueryBuilder {
   private loader: DataLoader;
   private joins: string[] = [];
   private filters: Filter[] = [];
-  private optionsData: { indexMode?: indexMode } = {};
+  private optionsData: { indexMode?: indexMode; indexDir?: string } = {};
 
   constructor(
     sourceName: string,
@@ -48,7 +50,7 @@ export class QueryBuilder {
     return this;
   }
 
-  options(opts: { indexMode?: indexMode }): this {
+  options(opts: { indexMode?: indexMode; indexDir?: string }): this {
     this.optionsData = {
       ...this.optionsData,
       ...opts,
@@ -81,34 +83,65 @@ export class QueryBuilder {
     let matchedSlugs: string[] | null = null;
 
     if (indexedFilters.length > 0 && indexMode !== "none" && sourceDef.index) {
-      const indexer = this.indexer ?? new Indexer(this.loader, this.config);
-      const allIndexes = await indexer.buildAll();
-      const indexRecords = allIndexes[this.sourceName];
+      const indexDir = this.optionsData.indexDir || "output";
+      let indexSlugs: string[] | null = null;
 
       for (const filter of indexedFilters) {
         const { field, op, value } = filter;
-        const matched = indexRecords
-          .filter((r) => {
-            const v = r.values?.[field];
-            if (v == null) return false;
-            if (op === "eq") return v === value;
-            if (op === "contains") return v.includes(value);
-            if (op === "in") {
-              if (!Array.isArray(value)) return false;
-              const vs = v.split(" ");
-              return vs.some((item: string) => value.includes(item));
-            }
-            return false;
-          })
-          .map((r) => r.slug);
+        // Try to load the index file for this field
+        let indexMap: Record<string, string[]> | null = null;
+        try {
+          // Try both with and without .json extension for compatibility
+          const filePath = `${indexDir}/${this.sourceName}.index-${field}.json`;
+          const fileContent = await fs.readFile(filePath, "utf-8");
+          indexMap = JSON.parse(fileContent);
+        } catch {
+          indexMap = null;
+        }
 
-        matchedSlugs = matchedSlugs
-          ? matchedSlugs.filter((slug) => matched.includes(slug))
+        let matched: string[] = [];
+        if (indexMap) {
+          if (op === "eq") {
+            matched = indexMap[String(value)] ?? [];
+          } else if (op === "contains") {
+            matched = Object.entries(indexMap)
+              .filter(([k]) => k.includes(String(value)))
+              .flatMap(([, slugs]) => slugs);
+          } else if (op === "in" && Array.isArray(value)) {
+            matched = value.flatMap((v) => indexMap[String(v)] ?? []);
+          }
+        }
+
+        if (matched.length === 0 && !indexMap) {
+          // Fallback to in-memory index if file not found
+          const indexer = this.indexer ?? new Indexer(this.loader, this.config);
+          const allIndexes = await indexer.buildAll();
+          const indexRecords = allIndexes[this.sourceName];
+          matched = indexRecords
+            .filter((r) => {
+              const v = r.values?.[field];
+              if (v == null) return false;
+              if (op === "eq") return v === value;
+              if (op === "contains") return v.includes(value);
+              if (op === "in") {
+                if (!Array.isArray(value)) return false;
+                const vs = v.split(" ");
+                return vs.some((item: string) => value.includes(item));
+              }
+              return false;
+            })
+            .map((r) => r.slug);
+        }
+
+        indexSlugs = indexSlugs
+          ? indexSlugs.filter((slug) => matched.includes(slug))
           : matched;
       }
 
+      matchedSlugs = indexSlugs;
+
       if (!matchedSlugs || matchedSlugs.length === 0) {
-        if (indexMode === "only" || indexMode === "first-no-fallback") {
+        if (indexMode === "only") {
           return [];
         }
         matchedSlugs = null;
@@ -193,11 +226,10 @@ export class QueryBuilder {
           >;
           const foreignData = await this.loader.load(directRel.to);
 
-          const foreignMap = new Map(
-            foreignData.map((row) => [
-              resolveField(row, directRel.foreignKey) ?? "",
-              row,
-            ])
+          // Use utility to build a Map from all possible foreignKey values to their parent object
+          const foreignMap = buildForeignKeyMap(
+            foreignData,
+            directRel.foreignKey
           );
 
           result = result.map((row) => {
@@ -210,7 +242,7 @@ export class QueryBuilder {
               )
               .filter((v) => v);
 
-            if (relType === "hasOne") {
+            if (relType === "hasOne" || relType === "belongsTo") {
               return { ...row, [key]: matches.length > 0 ? matches[0] : null };
             } else if (relType === "hasMany") {
               return { ...row, [key]: matches };
