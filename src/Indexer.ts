@@ -31,23 +31,74 @@ export class Indexer {
       const joins = Object.keys(sourceDef.relations ?? {});
       for (const key of joins) {
         const rel = sourceDef.relations![key];
-        const foreignData = await this.loader.load(rel.to);
 
-        const foreignMap = new Map(
-          foreignData.map((row) => [resolveField(row, rel.foreignKey), row])
-        );
+        // Type guard for through relation
+        const isThrough =
+          typeof rel === "object" &&
+          "through" in rel &&
+          (rel.type === "hasOneThrough" || rel.type === "hasManyThrough");
 
-        data = data.map((row) => ({
-          ...row,
+        if (isThrough) {
+          // Through relation (hasOneThrough, hasManyThrough)
+          const throughData = await this.loader.load(rel.through);
+          const throughMap = new Map(
+            throughData.map((row) => [resolveField(row, rel.throughForeignKey) ?? "", row])
+          );
 
-          [key]:
-            resolveField(row, rel.localKey)
-              ?.split(" ")
-              .map((key) =>
-                unwrapSingleArray(findEntriesByPartialKey(foreignMap, key))
-              )
-              .filter((v) => v) ?? null,
-        }));
+          const targetData = await this.loader.load(rel.to);
+          const targetMap = new Map(
+            targetData.map((row) => [resolveField(row, rel.targetForeignKey) ?? "", row])
+          );
+
+          data = data.map((row) => {
+            const sourceKey = resolveField(row, rel.sourceLocalKey);
+            if (!sourceKey) return { ...row, [key]: rel.type === "hasManyThrough" ? [] : null };
+
+            const throughMatches = throughData.filter(
+              (t) =>
+                (resolveField(t, rel.throughForeignKey) ?? "")
+                  .split(" ")
+                  .includes(sourceKey)
+            );
+
+            const targets = throughMatches
+              .map((t) => {
+                const throughKey = resolveField(t, rel.throughLocalKey);
+                return (throughKey ?? "")
+                  .split(" ")
+                  .map((k) => targetMap.get(k))
+                  .filter((v) => v);
+              })
+              .flat();
+
+            if (rel.type === "hasOneThrough") {
+              return { ...row, [key]: targets.length > 0 ? targets[0] : null };
+            } else {
+              // hasManyThrough
+              return { ...row, [key]: targets };
+            }
+          });
+        } else {
+          // Type guard for direct relation
+          const directRel = rel as Extract<typeof rel, { localKey: string; foreignKey: string }>;
+          const foreignData = await this.loader.load(directRel.to);
+
+          const foreignMap = new Map(
+            foreignData.map((row) => [resolveField(row, directRel.foreignKey) ?? "", row])
+          );
+
+          data = data.map((row) => ({
+            ...row,
+
+            [key]:
+              (resolveField(row, directRel.localKey) ?? "")
+                .split(" ")
+                .map((k) =>
+                  unwrapSingleArray(findEntriesByPartialKey(foreignMap, k))
+                )
+                .filter((v) => v) ?? null,
+          }));
+        }
       }
 
       const records = data.map((row) => {

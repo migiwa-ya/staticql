@@ -64,12 +64,22 @@ export default defineContentDB({
           localKey: "combinedHerbs.slug",
           foreignKey: "slug",
         },
+        processThroughReportGroup: {
+          to: "processes",
+          through: "reportGroups",
+          sourceLocalKey: "reportGroupSlug",
+          throughForeignKey: "slug",
+          throughLocalKey: "process",
+          targetForeignKey: "slug",
+          type: "hasOneThrough",
+        },
       },
       index: [
         "reportGroupSlug",
         "processSlug",
         "combinedHerbs.slug",
         "herbs.name",
+        "processThroughReportGroup.name",
       ],
     },
 
@@ -84,6 +94,18 @@ export default defineContentDB({
         })
       ),
       index: ["herbSlugs", "process"],
+    },
+
+    processes: {
+      path: "tests/content-fixtures/processes.yaml",
+      type: "yaml",
+      schema: z.array(
+        z.object({
+          slug: z.string(),
+          name: z.string(),
+          description: z.string(),
+        })
+      ),
     },
   },
 });

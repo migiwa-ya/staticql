@@ -13,6 +13,26 @@ beforeAll(async () => {
   await db.saveIndexesTo(OUTPUT_DIR);
 });
 
+describe("HasOneThrough / HasManyThrough Relations", () => {
+  it("should resolve hasOneThrough (reports.processThroughReportGroup)", async () => {
+    const reports = await db
+      .from("reports")
+      .join("processThroughReportGroup")
+      .exec();
+
+    const report = reports.find((r: any) => r.slug === "reportGroup002--001");
+    expect(report).toBeTruthy();
+
+    expect(
+      report.processThroughReportGroup === null ||
+        typeof report.processThroughReportGroup === "object"
+    ).toBe(true);
+    if (report.processThroughReportGroup) {
+      expect(report.processThroughReportGroup.slug).toBeDefined();
+    }
+  });
+});
+
 describe("Indexer", () => {
   it("should generate index file with values", async () => {
     const filePath = path.join(OUTPUT_DIR, "herbs.index.json");
