@@ -68,6 +68,12 @@ export default defineContentDB({
           foreignKey: "slug",
           type: "hasMany",
         },
+        reportGroup: {
+          to: "reportGroups",
+          localKey: "reportGroupSlug",
+          foreignKey: "slug",
+          type: "hasOne",
+        },
         processThroughReportGroup: {
           to: "processes",
           through: "reportGroups",
