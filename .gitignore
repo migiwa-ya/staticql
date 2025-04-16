@@ -5,7 +5,7 @@ dist/
 
 public/index/
 tests/output/
-tests/temp-index/
+tests/types/
 
 .DS_Store
 .vscode/
