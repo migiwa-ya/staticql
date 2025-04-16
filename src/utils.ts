@@ -44,14 +44,17 @@ export function getAllFieldValues(obj: any, fieldPath: string): string[] {
 }
 
 /**
- * Builds a Map from all possible values at a (possibly array) foreignKey path to their parent object
+ * Builds a Map from all possible values at a (possibly array) foreignKey path to an array of their parent objects.
  */
-export function buildForeignKeyMap(data: any[], foreignKeyPath: string): Map<string, any> {
-  const map = new Map<string, any>();
+export function buildForeignKeyMap(data: any[], foreignKeyPath: string): Map<string, any[]> {
+  const map = new Map<string, any[]>();
   for (const obj of data) {
     const values = getAllFieldValues(obj, foreignKeyPath);
     for (const v of values) {
-      map.set(v, obj);
+      if (!map.has(v)) {
+        map.set(v, []);
+      }
+      map.get(v)!.push(obj);
     }
   }
   return map;
