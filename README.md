@@ -6,7 +6,7 @@ staticql は、Markdown / YAML / JSON ファイルを型安全に読み込み、
 
 - Zod によるスキーマバリデーション
 - SQL ライクなクエリ（where / join）
-- CLI で index.json を出力可能
+- CLI でインデックファイル、API用メタファイルを出力可能
 
 ## インストール
 
@@ -71,15 +71,32 @@ export default defineContentDB({
 
 ## CLI の使い方
 
-```bash
-npx staticql-gen [configPath] [outputDir]
-```
+### 型定義(TypeScript)の生成
 
-例：
+TypeScript 型定義ファイルを自動生成するには、次のコマンドを実行します。
 
 ```bash
-npx staticql-gen staticql.config.ts public/index/
+npx statical-gen-types staticql.config.ts types
 ```
+
+- 第一引数: 設定ファイルのパス (例: staticql.config.ts)
+- 第二引数: 型定義ファイルの出力ディレクトリ (例: types)
+
+生成結果: `types/staticql-types.d.ts` に型定義が出力されます。
+
+### インデックスファイルの生成
+
+各 source のインデックスファイルや meta ファイルを生成するには、次のコマンドを実行します。
+
+```bash
+npx staticql-gen-index staticql.config.ts public/index/
+```
+
+- 第一引数: 設定ファイルのパス (例: staticql.config.ts)
+- 第二引数: インデックスファイルの出力ディレクトリ (例: public/index/)
+
+このコマンドにより、各 source ごとに `index-*.json` や `meta.json` などのファイルが指定ディレクトリに出力されます。  
+出力例: `public/index/herbs.index-name.json`, `public/index/herbs.meta.json` など。
 
 ## Index/Meta File Structure
 
@@ -182,7 +199,7 @@ main();
 ## Through Relations (hasOneThrough / hasManyThrough)
 
 - Through リレーションは、中間テーブル（モデル）を経由してリレーションを定義できます。
-- 例: `herbs` から `reports` を `combinedHerbs` 経由で取得する場合など。
+- 例: `herbs` から `processes` を `reportGroups` 経由で取得する場合など。
 
 ### 設定例
 
@@ -203,11 +220,6 @@ relations: {
 - `hasOneThrough` も同様に type を指定できます。
 - QueryBuilder で `.join("processThroughReportGroup")` で利用可能です。
 - meta: ["processThroughReportGroup.name"] のようにドット記法で中間リレーション先の属性も抽出できます。
-
-## For Contributors: Utilities
-
-- `buildForeignKeyMap`, `getAllFieldValues`, `extractNestedProperty` などのユーティリティ関数を `src/utils.ts` に集約しています。
-- リレーションやネストした属性の抽出処理はこれらを使ってください。
 
 ## 実行例（Node.js）
 

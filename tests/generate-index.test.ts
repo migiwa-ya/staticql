@@ -10,12 +10,12 @@ const configPath = path.join(__dirname, "staticql.config.ts");
 const outputPath = path.join(__dirname, "output");
 const indexFile = path.join(outputPath, "herbs.meta.json");
 
-describe("CLI generate.ts", () => {
+describe("CLI generate-index.ts", () => {
   beforeAll(async () => {
     await fs.rm(outputPath, { recursive: true, force: true });
 
     await exec("tsx", [
-      path.resolve("cli/generate.ts"),
+      path.resolve("cli/generate-index.ts"),
       configPath,
       outputPath,
     ]);

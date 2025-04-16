@@ -28,7 +28,7 @@ export default defineContentDB({
         },
       },
       index: ["name", "herbState.name", "reports.reportGroupSlug"],
-      meta: ["name", "tags", "herbState.name", "reports.reportGroupSlug"]
+      meta: ["name", "tags", "herbState.name", "reports.reportGroupSlug"],
     },
 
     herbStates: {
@@ -85,6 +85,7 @@ export default defineContentDB({
         "herbs.name",
         "processThroughReportGroup.name",
       ],
+      meta: ["herbs.name", "processThroughReportGroup.name"],
     },
 
     reportGroups: {
