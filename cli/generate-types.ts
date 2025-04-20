@@ -1,4 +1,4 @@
-#!/usr/bin/env tsx
+#!/usr/bin/env node
 
 import { zodToTs, createTypeAlias, printNode } from "zod-to-ts";
 import path from "path";
@@ -72,6 +72,8 @@ function extractZodFields(schema: any): Record<string, any> {
             fields[key] = "boolean";
           } else if (typeName === "ZodLiteral") {
             fields[key] = JSON.stringify(unwrapped._def.value);
+          } else if (typeName === "ZodDate") {
+            fields[key] = "string"
           } else {
             fields[key] = "any";
           }

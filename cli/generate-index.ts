@@ -1,4 +1,4 @@
-#!/usr/bin/env tsx
+#!/usr/bin/env node
 
 import path from "path";
 import { pathToFileURL } from "url";
