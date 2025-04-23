@@ -27,7 +27,7 @@ export default defineContentDB({
           type: "hasMany",
         },
       },
-      index: ["name", "herbState.name", "reports.reportGroupSlug"],
+      index: ["name", "herbState.name", "reports.reportGroupSlug", "tags"],
       splitIndexByKey: true,
       meta: ["name", "tags", "herbState.name", "reports.reportGroupSlug"],
     },
