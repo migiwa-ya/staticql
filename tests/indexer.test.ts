@@ -3,7 +3,7 @@ import path from "path";
 import fs from "fs/promises";
 import staticqlConfig from "./staticql.config";
 
-const OUTPUT_DIR = path.join(__dirname, "output");
+const OUTPUT_DIR = "tests/output";
 
 const db = staticqlConfig;
 

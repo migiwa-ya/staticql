@@ -2,15 +2,16 @@ import { DataLoader } from "./DataLoader.js";
 import { Indexer } from "./Indexer.js";
 import type { ContentDBConfig } from "./types";
 import { QueryBuilder } from "./QueryBuilder.js";
+import type { StorageProvider } from "./storage/StorageProvider";
 
 export class ContentDB {
   private config: ContentDBConfig;
   private loader: DataLoader;
   private indexer: Indexer;
 
-  constructor(config: ContentDBConfig) {
+  constructor(config: ContentDBConfig, provider: StorageProvider) {
     this.config = config;
-    this.loader = new DataLoader(config);
+    this.loader = new DataLoader(config, provider);
     this.indexer = new Indexer(this.loader, config);
   }
 

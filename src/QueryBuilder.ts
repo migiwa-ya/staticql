@@ -1,7 +1,7 @@
 import type { DataLoader } from "./DataLoader.js";
 import type { ContentDBConfig } from "./types";
 import { Indexer } from "./Indexer.js";
-import fs from "fs/promises";
+import type { StorageProvider } from "./storage/StorageProvider";
 import {
   resolveField,
   unwrapSingleArray,
@@ -90,10 +90,17 @@ export class QueryBuilder {
         const { field, op, value } = filter;
         // Try to load the index file for this field
         let indexMap: Record<string, string[]> | null = null;
+        // Try both with and without .json extension for compatibility
+        const filePath = `${indexDir}/${this.sourceName}.index-${field}.json`;
+        const provider: StorageProvider = (this.loader as any).provider;
         try {
-          // Try both with and without .json extension for compatibility
-          const filePath = `${indexDir}/${this.sourceName}.index-${field}.json`;
-          const fileContent = await fs.readFile(filePath, "utf-8");
+          let raw = await provider.readFile(filePath);
+          let fileContent: string;
+          if (raw instanceof Uint8Array) {
+            fileContent = new TextDecoder().decode(raw);
+          } else {
+            fileContent = raw;
+          }
           indexMap = JSON.parse(fileContent);
         } catch {
           indexMap = null;
@@ -108,11 +115,11 @@ export class QueryBuilder {
               .filter(([k]) => k.includes(String(value)))
               .flatMap(([, slugs]) => slugs);
           } else if (op === "in" && Array.isArray(value)) {
-            matched = value.flatMap((v) => indexMap[String(v)] ?? []);
+            matched = value.flatMap((v) => indexMap![String(v)] ?? []);
           }
         }
 
-        if (matched.length === 0 && !indexMap) {
+        if ((!indexMap || matched.length === 0)) {
           // Fallback to in-memory index if file not found
           const indexer = this.indexer ?? new Indexer(this.loader, this.config);
           const allIndexes = await indexer.buildAll();

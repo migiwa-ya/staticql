@@ -11,3 +11,6 @@ tests/types/
 .vscode/
 .idea/
 *.log
+
+/docs
+.clinerules

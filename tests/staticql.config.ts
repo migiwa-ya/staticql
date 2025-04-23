@@ -1,4 +1,4 @@
-import { defineContentDB } from "../src";
+import { defineContentDB } from "../src/index.js";
 import { z } from "zod";
 
 export default defineContentDB({
@@ -116,6 +116,7 @@ export default defineContentDB({
           description: z.string(),
         })
       ),
+      index: ["name"],
     },
   },
 });

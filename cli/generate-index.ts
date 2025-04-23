@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 
-import path from "path";
 import { pathToFileURL } from "url";
 
 async function run() {
   const [inputConfig, inputOut] = process.argv.slice(2);
-  const configPath = path.resolve(
-    process.cwd(),
-    inputConfig || "staticql.config.ts"
-  );
-  const outputDir = path.resolve(process.cwd(), inputOut || "public/index");
+  // Node.js/Workers両対応: 絶対パスならそのまま、相対パスならCWDから連結
+  let configPath = inputConfig || "staticql.config.ts";
+  if (!configPath.startsWith("/") && typeof process !== "undefined" && process.cwd) {
+    configPath = process.cwd() + "/" + configPath;
+  }
+  const outputDir = inputOut || "public/index";
 
   let db;
 
