@@ -3,6 +3,7 @@ name: ペパーミント
 nameScientific: Mentha piperita
 nameAliases: [ペパーミント]
 tags: [refresh, digestion]
+herbStateSlug: fresh
 ---
 
 ## History

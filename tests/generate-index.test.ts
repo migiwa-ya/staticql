@@ -26,14 +26,15 @@ describe("CLI generate-index.ts", () => {
       .stat(indexFile)
       .then(() => true)
       .catch(() => false);
+
     expect(exists).toBe(true);
 
     const json = JSON.parse(await fs.readFile(indexFile, "utf-8"));
     const allHaveName = Object.values(json).every(
       (item: any) => "name" in item
     );
-    expect(allHaveName).toBe(true);
 
+    expect(allHaveName).toBe(true);
     expect(json).toHaveProperty("mentha-piperita");
   });
 });

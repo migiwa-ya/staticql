@@ -7,6 +7,7 @@ import {
   findEntriesByPartialKey,
   extractNestedProperty,
   buildForeignKeyMap,
+  ensureDir,
 } from "./utils.js";
 
 export class Indexer {
@@ -152,22 +153,59 @@ export class Indexer {
       // Write index files per field
       if (sourceDef.index) {
         for (const field of sourceDef.index) {
-          const indexMap: Record<string, string[]> = {};
-          for (const rec of records) {
-            const value = rec.values[field];
-            if (value == null) continue;
-            // Support multi-value fields (space-separated)
-            for (const v of value.split(" ")) {
-              if (!v) continue;
-              if (!indexMap[v]) indexMap[v] = [];
-              indexMap[v].push(rec.slug);
+          if (sourceDef.splitIndexByKey) {
+            // 分割方式: output/{source_name}/index-{field}/{key_value}.json
+            const dirPath = `${outputDir.replace(
+              /\/$/,
+              ""
+            )}/${sourceName}/index-${field}`;
+            // ローカルファイルシステム時のみensureDir
+            if (
+              (provider as any).type === "filesystem" ||
+              (provider as any).baseDir !== undefined
+            ) {
+              await ensureDir(dirPath);
             }
+            // key_valueごとにファイルを分割出力
+            const keyMap: Record<string, string[]> = {};
+            for (const rec of records) {
+              const value = rec.values[field];
+              if (value == null) continue;
+              for (const v of value.split(" ")) {
+                if (!v) continue;
+                if (!keyMap[v]) keyMap[v] = [];
+                keyMap[v].push(rec.slug);
+              }
+            }
+            for (const [keyValue, slugs] of Object.entries(keyMap)) {
+              const filePath = `${dirPath}/${keyValue}.json`;
+              await provider.writeFile(
+                filePath,
+                JSON.stringify(slugs, null, 2)
+              );
+            }
+          } else {
+            // 従来方式: {source_name}.index-{field}.json
+            const indexMap: Record<string, string[]> = {};
+            for (const rec of records) {
+              const value = rec.values[field];
+              if (value == null) continue;
+              // Support multi-value fields (space-separated)
+              for (const v of value.split(" ")) {
+                if (!v) continue;
+                if (!indexMap[v]) indexMap[v] = [];
+                indexMap[v].push(rec.slug);
+              }
+            }
+            const filePath = `${outputDir.replace(
+              /\/$/,
+              ""
+            )}/${sourceName}.index-${field}.json`;
+            await provider.writeFile(
+              filePath,
+              JSON.stringify(indexMap, null, 2)
+            );
           }
-          const filePath = `${outputDir.replace(/\/$/, "")}/${sourceName}.index-${field}.json`;
-          await provider.writeFile(
-            filePath,
-            JSON.stringify(indexMap, null, 2)
-          );
         }
       }
 
@@ -203,7 +241,10 @@ export class Indexer {
           metaMap[row.slug] = metaObj;
         }
 
-        const filePath = `${outputDir.replace(/\/$/, "")}/${sourceName}.meta.json`;
+        const filePath = `${outputDir.replace(
+          /\/$/,
+          ""
+        )}/${sourceName}.meta.json`;
         await provider.writeFile(filePath, JSON.stringify(metaMap, null, 2));
       }
     }

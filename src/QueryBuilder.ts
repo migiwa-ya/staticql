@@ -7,6 +7,7 @@ import {
   unwrapSingleArray,
   findEntriesByPartialKey,
   buildForeignKeyMap,
+  getAllFieldValues,
 } from "./utils.js";
 
 type Operator = "eq" | "contains" | "in";
@@ -50,6 +51,8 @@ export class QueryBuilder {
     return this;
   }
 
+  options(opts: { indexMode: "only"; indexDir: string }): this;
+  options(opts: { indexMode: "none" }): this;
   options(opts: { indexMode?: indexMode; indexDir?: string }): this {
     this.optionsData = {
       ...this.optionsData,
@@ -61,7 +64,7 @@ export class QueryBuilder {
   async exec(): Promise<any[]> {
     const sourceDef = this.config.sources[this.sourceName];
     const indexableFields = new Set(sourceDef.index ?? []);
-    const indexMode: indexMode = this.optionsData?.indexMode ?? "only";
+    const indexMode: indexMode = this.optionsData?.indexMode ?? "none";
 
     let indexedFilters: Filter[] = [];
     let fallbackFilters: Filter[] = [];
@@ -88,56 +91,107 @@ export class QueryBuilder {
 
       for (const filter of indexedFilters) {
         const { field, op, value } = filter;
-        // Try to load the index file for this field
-        let indexMap: Record<string, string[]> | null = null;
-        // Try both with and without .json extension for compatibility
-        const filePath = `${indexDir}/${this.sourceName}.index-${field}.json`;
         const provider: StorageProvider = (this.loader as any).provider;
-        try {
-          let raw = await provider.readFile(filePath);
-          let fileContent: string;
-          if (raw instanceof Uint8Array) {
-            fileContent = new TextDecoder().decode(raw);
-          } else {
-            fileContent = raw;
-          }
-          indexMap = JSON.parse(fileContent);
-        } catch {
-          indexMap = null;
-        }
-
         let matched: string[] = [];
-        if (indexMap) {
-          if (op === "eq") {
-            matched = indexMap[String(value)] ?? [];
-          } else if (op === "contains") {
-            matched = Object.entries(indexMap)
-              .filter(([k]) => k.includes(String(value)))
-              .flatMap(([, slugs]) => slugs);
-          } else if (op === "in" && Array.isArray(value)) {
-            matched = value.flatMap((v) => indexMap![String(v)] ?? []);
-          }
-        }
 
-        if ((!indexMap || matched.length === 0)) {
-          // Fallback to in-memory index if file not found
-          const indexer = this.indexer ?? new Indexer(this.loader, this.config);
-          const allIndexes = await indexer.buildAll();
-          const indexRecords = allIndexes[this.sourceName];
-          matched = indexRecords
-            .filter((r) => {
-              const v = r.values?.[field];
-              if (v == null) return false;
-              if (op === "eq") return v === value;
-              if (op === "contains") return v.includes(value);
-              if (op === "in") {
-                if (!Array.isArray(value)) return false;
-                const vs = v.split(" ");
-                return vs.some((item: string) => value.includes(item));
+        if (sourceDef.splitIndexByKey) {
+          // 分割インデックス方式
+          const dirPath = `${indexDir}/${this.sourceName}/index-${field}`;
+          if (op === "eq") {
+            const keyValue = String(value);
+            const filePath = `${dirPath}/${keyValue}.json`;
+            try {
+              let raw = await provider.readFile(filePath);
+              let fileContent: string;
+              if (raw instanceof Uint8Array) {
+                fileContent = new TextDecoder().decode(raw);
+              } else {
+                fileContent = raw;
               }
-              return false;
-            })
-            .map((r) => r.slug);
+              matched = JSON.parse(fileContent);
+            } catch {
+              matched = [];
+            }
+          } else if (op === "in" && Array.isArray(value)) {
+            for (const keyValue of value) {
+              const filePath = `${indexDir}/${dirPath}/${keyValue}.json`;
+              try {
+                let raw = await provider.readFile(filePath);
+                let fileContent: string;
+                if (raw instanceof Uint8Array) {
+                  fileContent = new TextDecoder().decode(raw);
+                } else {
+                  fileContent = raw;
+                }
+                matched.push(...JSON.parse(fileContent));
+              } catch {
+                // skip missing
+              }
+            }
+          } else if (op === "contains") {
+            // containsの場合は全ファイルをリストアップして部分一致検索
+            let files: string[] = [];
+            try {
+              files = await provider.listFiles(
+                `${indexDir}/${this.sourceName}/index-${field}/`
+              );
+            } catch {
+              files = [];
+            }
+            for (const file of files) {
+              const key = file.replace(/^.*\//, "").replace(/\.json$/, "");
+              if (key.includes(String(value))) {
+                try {
+                  let raw = await provider.readFile(file);
+                  let fileContent: string;
+                  if (raw instanceof Uint8Array) {
+                    fileContent = new TextDecoder().decode(raw);
+                  } else {
+                    fileContent = raw;
+                  }
+                  matched.push(...JSON.parse(fileContent));
+                } catch {
+                  // skip missing
+                }
+              }
+            }
+          }
+        } else {
+          // 従来方式
+          let indexMap: Record<string, string[]> | null = null;
+          const filePath = `${indexDir}/${this.sourceName}.index-${field}.json`;
+          try {
+            let raw = await provider.readFile(filePath);
+            let fileContent: string;
+            if (raw instanceof Uint8Array) {
+              fileContent = new TextDecoder().decode(raw);
+            } else {
+              fileContent = raw;
+            }
+            indexMap = JSON.parse(fileContent);
+          } catch {
+            indexMap = null;
+          }
+
+          if (indexMap) {
+            if (op === "eq") {
+              const countMap: any = {};
+              for (const items of Object.values(indexMap)) {
+                for (const id of items) {
+                  countMap[id] = (countMap[id] || 0) + 1;
+                }
+              }
+              matched = indexMap[String(value)].filter(
+                (id) => countMap[id] === 1
+              );
+            } else if (op === "contains") {
+              matched = Object.entries(indexMap)
+                .filter(([k]) => k.includes(String(value)))
+                .flatMap(([, slugs]) => slugs);
+            } else if (op === "in" && Array.isArray(value)) {
+              matched = value.flatMap((v) => indexMap![String(v)] ?? []);
+            }
+          }
         }
 
         indexSlugs = indexSlugs
@@ -265,16 +319,14 @@ export class QueryBuilder {
     for (const filter of fallbackFilters) {
       const { field, op, value } = filter;
       result = result.filter((row) => {
-        const val = field.split(".").reduce((acc, key) => acc?.[key], row);
-        if (val == null) return false;
-        if (op === "eq") return String(val) === value;
-        if (op === "contains") return String(val).includes(value);
+        const vals = getAllFieldValues(row, field);
+        if (vals.length === 0) return false;
+        if (op === "eq") return vals[0] === value;
+        if (op === "contains")
+          return vals.some((v: string) => v.includes(value));
         if (op === "in") {
           if (!Array.isArray(value)) return false;
-          if (Array.isArray(val)) {
-            return val.some((item) => value.includes(item));
-          }
-          return value.includes(val);
+          return vals.some((v: string) => value.includes(v));
         }
         return false;
       });

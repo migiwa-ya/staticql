@@ -9,6 +9,11 @@ export type SourceConfig = {
   index?: string[];
   meta?: string[];
   relations?: Record<string, RelationConfig>;
+  /**
+   * インデックスファイルをキーごとに分割する場合はtrue
+   * 未指定時は従来通り全件1ファイル
+   */
+  splitIndexByKey?: boolean;
 };
 
 export type RelationConfig =
