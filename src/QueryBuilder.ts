@@ -114,7 +114,7 @@ export class QueryBuilder {
             }
           } else if (op === "in" && Array.isArray(value)) {
             for (const keyValue of value) {
-              const filePath = `${indexDir}/${dirPath}/${keyValue}.json`;
+              const filePath = `${dirPath}/${keyValue}.json`;
               try {
                 let raw = await provider.readFile(filePath);
                 let fileContent: string;
