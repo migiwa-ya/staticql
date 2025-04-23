@@ -105,6 +105,43 @@ npx staticql-gen-index staticql.config.ts public/index/
 - `meta.json` ファイルは、meta: [] で指定した属性やリレーションの値を slug ごとにまとめて出力します。
 - ドット記法（例: `"reports.reportGroupSlug"`）でリレーション先の属性も抽出できます。
 
+### インデックスファイルの分割方式（splitIndexByKey）
+
+データ量が多い場合、インデックスファイルを「キーごと」に分割して出力することができます。  
+`staticql.config.ts` の各 source ブロックで `splitIndexByKey: true` を指定すると、  
+インデックスファイルがキーごとにサブディレクトリ分割され、必要なキーのみを効率的に読み込めます。
+
+#### 設定例
+
+```ts
+sources: {
+  reportGroups: {
+    // ...
+    index: ["processSlug"],
+    splitIndexByKey: true, // ← 追加
+  }
+}
+```
+
+#### 出力例
+
+```
+output/
+└── reportGroups/
+    └── index-processSlug/
+        ├── 001.json
+        ├── 002.json
+        └── ...
+```
+
+- それぞれのファイル（例: `001.json`）には、そのキー値に該当するslug配列が格納されます。
+- デフォルト（splitIndexByKey未指定またはfalse）は従来通り `reportGroups.index-processSlug.json` 1ファイルに全件が格納されます。
+
+#### どちらを選ぶべきか
+
+- データ量が少ない場合や全件一括ロードが許容される場合は従来方式で十分です。
+- データ量が多くインデックスファイルが巨大化する場合は、分割方式（splitIndexByKey: true）を推奨します。
+
 ## Meta Extraction (meta: [])
 
 - `meta: []` を指定すると、各 source ごとに `{source}.meta.json` が出力されます。

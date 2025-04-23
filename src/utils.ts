@@ -1,3 +1,6 @@
+import { promises as fs } from "fs";
+import * as path from "path";
+
 export function resolveField(obj: any, fieldPath: string): string | undefined {
   const segments = fieldPath.split(".");
   let value: any = obj;
@@ -100,4 +103,11 @@ export function findEntriesByPartialKey<K extends string | undefined, V>(
   return Array.from(map.entries())
     .filter(([key]) => key && matchFn(key))
     .map(([, value]) => value);
+}
+
+/**
+ * 指定ディレクトリがなければ再帰的に作成する
+ */
+export async function ensureDir(dirPath: string): Promise<void> {
+  await fs.mkdir(dirPath, { recursive: true });
 }
