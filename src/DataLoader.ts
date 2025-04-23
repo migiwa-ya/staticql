@@ -1,16 +1,16 @@
-import fs from "fs/promises";
-import path from "node:path";
 import matter from "gray-matter";
 import yaml from "js-yaml";
-import { globby } from "globby";
 import type { ContentDBConfig, SourceConfig } from "./types";
+import type { StorageProvider } from "./storage/StorageProvider";
 
 export class DataLoader {
   private config: ContentDBConfig;
+  private provider: StorageProvider;
   private cache: Map<string, any[]> = new Map();
 
-  constructor(config: ContentDBConfig) {
+  constructor(config: ContentDBConfig, provider: StorageProvider) {
     this.config = config;
+    this.provider = provider;
   }
 
   async load(sourceName: string): Promise<any[]> {
@@ -21,9 +21,9 @@ export class DataLoader {
     const source = this.config.sources[sourceName];
     if (!source) throw new Error(`Unknown source: ${sourceName}`);
 
-    const files = await globby(source.path);
+    const files = await this.provider.listFiles(source.path);
     const parsed = await Promise.all(
-      files.map((f) => this.parseFile(f, source, f))
+      files.map((f: string) => this.parseFile(f, source, f))
     );
 
     const flattened =
@@ -40,10 +40,10 @@ export class DataLoader {
     const source = this.config.sources[sourceName];
     if (!source) throw new Error(`Unknown source: ${sourceName}`);
 
-    const ext = path.extname(source.path);
+    const ext = this.getExtname(source.path);
 
-    const relativePath = slug.replace(/--/g, path.sep) + ext;
-    const filePath = this.resolveFilePath(path.resolve(source.path), relativePath)
+    const relativePath = slug.replace(/--/g, "/") + ext;
+    const filePath = this.resolveFilePath(source.path, relativePath);
 
     try {
       const parsed = await this.parseFile(filePath, source, filePath);
@@ -59,8 +59,11 @@ export class DataLoader {
     source: SourceConfig,
     fullPath: string
   ): Promise<any> {
-    const ext = path.extname(fullPath);
-    const raw = await fs.readFile(fullPath, "utf-8");
+    const ext = this.getExtname(fullPath);
+    let raw = await this.provider.readFile(fullPath);
+    if (raw instanceof Uint8Array) {
+      raw = new TextDecoder().decode(raw);
+    }
 
     let parsed: any;
 
@@ -95,40 +98,39 @@ export class DataLoader {
     return parsed;
   }
 
-  private getSlugFromPath(sourcePath: string, filePath: string) {
-    const sourceDir = path.dirname(sourcePath);
-    const ext = path.extname(filePath);
+  // 拡張子取得（Node.js非依存）
+  private getExtname(p: string): string {
+    const i = p.lastIndexOf(".");
+    if (i === -1) return "";
+    return p.slice(i);
+  }
 
-    const absSource = path.resolve(sourceDir);
-    const absFile = path.resolve(filePath);
-
-    const projectRoot = this.findCommonRoot(absSource, absFile);
-    const relativePath = path.relative(projectRoot, absFile);
-
-    const slug = relativePath.replace(ext, "").replace(/[\\/]/g, "--");
-
+  // slug生成（Node.js非依存）
+  private getSlugFromPath(sourcePath: string, filePath: string): string {
+    // sourcePath例: "tests/content-fixtures/herbs/*.md"
+    // filePath例: "tests/content-fixtures/herbs/matricaria-chamomilla.md"
+    // slug: "matricaria-chamomilla"
+    const ext = this.getExtname(filePath);
+    const baseDir = this.extractBaseDir(sourcePath);
+    let rel = filePath.startsWith(baseDir)
+      ? filePath.slice(baseDir.length)
+      : filePath;
+    if (rel.startsWith("/")) rel = rel.slice(1);
+    const slug = rel.replace(ext, "").replace(/\//g, "--");
     return slug;
   }
 
-  private findCommonRoot(a: string, b: string) {
-    const aParts = a.split(path.sep);
-    const bParts = b.split(path.sep);
-    const len = Math.min(aParts.length, bParts.length);
-
-    let i = 0;
-    while (i < len && aParts[i] === bParts[i]) i++;
-
-    return aParts.slice(0, i).join(path.sep);
-  }
-
-  private extractBaseDir(globPath: string) {
-    const parts = globPath.split(/[\\/]/);
+  // sourcePathからワイルドカードより前のディレクトリ部分を抽出
+  private extractBaseDir(globPath: string): string {
+    const parts = globPath.split("/");
     const index = parts.findIndex((part) => part.includes("*"));
-    return path.resolve(parts.slice(0, index).join(path.sep));
+    if (index === -1) return globPath;
+    return parts.slice(0, index).join("/") + "/";
   }
 
-  private resolveFilePath(sourceGlob: string, relativePath: string) {
+  // sourceGlob, relativePathから論理パスを生成
+  private resolveFilePath(sourceGlob: string, relativePath: string): string {
     const baseDir = this.extractBaseDir(sourceGlob);
-    return path.resolve(baseDir, relativePath);
+    return baseDir + relativePath;
   }
 }

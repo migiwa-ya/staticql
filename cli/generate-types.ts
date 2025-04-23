@@ -2,8 +2,8 @@
 
 import { zodToTs, createTypeAlias, printNode } from "zod-to-ts";
 import path from "path";
-import fs from "fs/promises";
 import { pathToFileURL } from "url";
+import { FileSystemProvider } from "../src/storage/FileSystemProvider.js";
 
 // Recursively unwrap ZodEffects, ZodDefault, etc. to get to the base schema
 function unwrapSchema(schema: any): any {
@@ -127,8 +127,8 @@ async function run() {
     process.cwd(),
     inputConfig || "staticql.config.ts"
   );
-  const outputDir = path.resolve(process.cwd(), inputOut || "types");
-  const outPath = path.resolve(outputDir || "types/", "staticql-types.d.ts");
+  const outputDir = inputOut || "types";
+  const outPath = (outputDir.endsWith("/") ? outputDir : outputDir + "/") + "staticql-types.d.ts";
 
   let db;
 
@@ -349,7 +349,8 @@ async function run() {
   typeDefs += metaTypeStrings.join("") + "\n";
   typeDefs += relationTypeStrings.join("") + "\n";
 
-  await fs.writeFile(outPath, typeDefs, "utf-8");
+  const provider = new FileSystemProvider(db.config?.storage?.baseDir);
+  await provider.writeFile(outPath, typeDefs);
   console.log(`Types generated to ${outPath}`);
 }
 

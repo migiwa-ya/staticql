@@ -58,6 +58,7 @@
     "zod-to-ts": "^1.2.0"
   },
   "dependencies": {
+    "aws4fetch": "^1.0.20",
     "globby": "^14.1.0",
     "gray-matter": "^4.0.3",
     "js-yaml": "^4.1.0",

@@ -30,6 +30,13 @@ export type RelationConfig =
       type: "hasOneThrough" | "hasManyThrough";
     };
 
+import type { S3ProviderOptions } from "./storage/S3Provider";
+
+export type StorageConfig =
+  | { type: "filesystem"; baseDir?: string }
+  | ({ type: "s3" } & S3ProviderOptions);
+
 export type ContentDBConfig = {
   sources: Record<string, SourceConfig>;
+  storage?: StorageConfig;
 };

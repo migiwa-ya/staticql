@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import { execFile } from "child_process";
@@ -8,8 +7,8 @@ import { promisify } from "util";
 const exec = promisify(execFile);
 
 const typeFilename = "staticql-types.d.ts";
-const configPath = path.join(__dirname, "staticql.config.ts");
-const outputPath = path.join(__dirname, "types/");
+const configPath = "tests/staticql.config.ts";
+const outputPath = "tests/types/";
 
 describe("generate-types", () => {
   beforeAll(async () => {
@@ -56,7 +55,6 @@ describe("generate-types", () => {
 
   it("generates ReportsMeta with correct nested types", () => {
     const content = fs.readFileSync(outputPath + typeFilename, "utf-8");
-    console.log(content)
     expect(content).toMatch(/"herbs\.name"\?: string\[];/);
     expect(content).toMatch(/"processThroughReportGroup\.name"\?: string;/);
   });

@@ -1,7 +1,6 @@
-import path from "path";
-import fs from "fs/promises";
 import { DataLoader } from "./DataLoader.js";
 import { ContentDBConfig } from "./types";
+import type { StorageProvider } from "./storage/StorageProvider";
 import {
   resolveField,
   unwrapSingleArray,
@@ -144,7 +143,8 @@ export class Indexer {
 
   async saveTo(outputDir: string): Promise<void> {
     const all = await this.buildAll();
-    await fs.mkdir(outputDir, { recursive: true });
+    // Provider経由でファイル出力
+    const provider: StorageProvider = (this.loader as any).provider;
 
     for (const [sourceName, records] of Object.entries(all)) {
       const sourceDef = this.config.sources[sourceName];
@@ -163,14 +163,10 @@ export class Indexer {
               indexMap[v].push(rec.slug);
             }
           }
-          const filePath = path.join(
-            outputDir,
-            `${sourceName}.index-${field}.json`
-          );
-          await fs.writeFile(
+          const filePath = `${outputDir.replace(/\/$/, "")}/${sourceName}.index-${field}.json`;
+          await provider.writeFile(
             filePath,
-            JSON.stringify(indexMap, null, 2),
-            "utf-8"
+            JSON.stringify(indexMap, null, 2)
           );
         }
       }
@@ -207,8 +203,8 @@ export class Indexer {
           metaMap[row.slug] = metaObj;
         }
 
-        const filePath = path.join(outputDir, `${sourceName}.meta.json`);
-        await fs.writeFile(filePath, JSON.stringify(metaMap, null, 2), "utf-8");
+        const filePath = `${outputDir.replace(/\/$/, "")}/${sourceName}.meta.json`;
+        await provider.writeFile(filePath, JSON.stringify(metaMap, null, 2));
       }
     }
   }

@@ -6,9 +6,9 @@ import { promisify } from "util";
 
 const exec = promisify(execFile);
 
-const configPath = path.join(__dirname, "staticql.config.ts");
-const outputPath = path.join(__dirname, "output");
-const indexFile = path.join(outputPath, "herbs.meta.json");
+const configPath = "tests/staticql.config.ts";
+const outputPath = "tests/output";
+const indexFile = "tests/output/herbs.meta.json";
 
 describe("CLI generate-index.ts", () => {
   beforeAll(async () => {
@@ -29,7 +29,9 @@ describe("CLI generate-index.ts", () => {
     expect(exists).toBe(true);
 
     const json = JSON.parse(await fs.readFile(indexFile, "utf-8"));
-    const allHaveName = Object.values(json).every((item: any) => "name" in item);
+    const allHaveName = Object.values(json).every(
+      (item: any) => "name" in item
+    );
     expect(allHaveName).toBe(true);
 
     expect(json).toHaveProperty("mentha-piperita");

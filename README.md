@@ -221,6 +221,38 @@ relations: {
 - QueryBuilder で `.join("processThroughReportGroup")` で利用可能です。
 - meta: ["processThroughReportGroup.name"] のようにドット記法で中間リレーション先の属性も抽出できます。
 
+## Cloudflare R2 / S3互換ストレージ対応
+
+staticqlはローカルファイルだけでなく、Cloudflare R2やS3互換ストレージもデータソース・出力先として利用できます。  
+CLI・QueryBuilder・Indexer・型生成など全てのI/OがStorageProviderで抽象化されており、設定ファイルでstorage.typeを切り替えるだけでローカル/クラウド両対応となります。
+
+### 設定例（R2/S3バケット利用）
+
+```ts
+import { defineContentDB } from "@migiwa-ya/staticql";
+import { z } from "zod";
+
+export default defineContentDB({
+  storage: {
+    type: "s3",
+    endpoint: "https://<accountid>.r2.cloudflarestorage.com",
+    bucket: "<bucket-name>",
+    accessKeyId: "<R2_ACCESS_KEY_ID>",
+    secretAccessKey: "<R2_SECRET_ACCESS_KEY>",
+    // region: "auto" // R2はregion不要
+  },
+  sources: {
+    // ...従来通り
+  }
+});
+```
+
+- storage.type: "s3" でR2/S3バケットを利用
+- Node.js/Cloudflare Workers/Fetch API両対応
+- S3互換APIへの署名付きリクエストには [aws4fetch](https://github.com/mhart/aws4fetch) を利用
+- CLIやQueryBuilderも自動的にProviderを切り替え
+- 出力先パスは論理パスで指定（バケット内のディレクトリ構成をそのまま反映）
+
 ## 実行例（Node.js）
 
 ```ts
