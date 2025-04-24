@@ -91,6 +91,86 @@ export function unwrapSingleArray(value: any) {
   return value;
 }
 
+/**
+ * Resolves a direct relation for a row (hasOne/hasMany).
+ * @param row - The source row object
+ * @param rel - The relation definition (must have localKey, foreignKey, type)
+ * @param foreignData - Array of target objects
+ * @returns Related object(s) or null/[]
+ */
+export function resolveDirectRelation(
+  row: any,
+  rel: any,
+  foreignData: any[]
+): any {
+  const foreignMap = buildForeignKeyMap(foreignData, rel.foreignKey);
+  const relType = rel.type;
+  const localVal = (resolveField(row, rel.localKey) ?? "") as string;
+  const keys = localVal.split(" ").filter(Boolean);
+
+  // For each key, get all matching arrays of objects, flatten, and deduplicate
+  const matches = keys
+    .map((k: string) => findEntriesByPartialKey(foreignMap, k))
+    .flat()
+    .filter((v: any) => v);
+
+  if (relType === "hasOne") {
+    if (matches.length > 0 && Array.isArray(matches[0])) {
+      return matches.flat()[0];
+    }
+    return matches.length > 0 ? matches[0] : null;
+  } else if (relType === "hasMany") {
+    return matches.flat();
+  } else {
+    return matches.flat();
+  }
+}
+
+/**
+ * Resolves a through relation for a row (hasOneThrough/hasManyThrough).
+ * @param row - The source row object
+ * @param rel - The relation definition (must have through, throughLocalKey, throughForeignKey, targetForeignKey, type)
+ * @param throughData - Array of through objects
+ * @param targetData - Array of target objects
+ * @returns Related object(s) or null/[]
+ */
+export function resolveThroughRelation(
+  row: any,
+  rel: any,
+  throughData: any[],
+  targetData: any[]
+): any {
+  const sourceKey = (resolveField(row, rel.sourceLocalKey) ?? "") as string;
+  const throughMatches = throughData.filter((t: any) =>
+    ((resolveField(t, rel.throughForeignKey) ?? "") as string)
+      .split(" ")
+      .includes(sourceKey)
+  );
+  const targetMap = new Map<string, any>(
+    targetData.map((r: any) => [
+      resolveField(r, rel.targetForeignKey) ?? "",
+      r,
+    ])
+  );
+  const targets = throughMatches
+    .map((t: any) => {
+      const throughKey = (resolveField(t, rel.throughLocalKey) ?? "") as string;
+      return throughKey
+        .split(" ")
+        .map((k: string) => targetMap.get(k))
+        .filter((v: any) => v);
+    })
+    .flat();
+  if (rel.type === "hasOneThrough") {
+    if (targets.length > 0 && Array.isArray(targets[0])) {
+      return targets[0];
+    }
+    return targets.length > 0 ? targets[0] : null;
+  } else {
+    return targets;
+  }
+}
+
 export function findEntriesByPartialKey<K extends string | undefined, V>(
   map: Map<K, V>,
   keyword: string,

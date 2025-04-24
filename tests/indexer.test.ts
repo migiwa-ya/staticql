@@ -23,14 +23,8 @@ describe("HasOneThrough / HasManyThrough Relations", () => {
 
     const report = reports.find((r: any) => r.slug === "reportGroup002--001");
     expect(report).toBeTruthy();
-
-    expect(
-      report.processThroughReportGroup === null ||
-        typeof report.processThroughReportGroup === "object"
-    ).toBe(true);
-    if (report.processThroughReportGroup) {
-      expect(report.processThroughReportGroup.slug).toBeDefined();
-    }
+    expect(typeof report.processThroughReportGroup === "object").toBe(true);
+    expect(report.processThroughReportGroup.slug).toBe("tincture");
   });
 });
 

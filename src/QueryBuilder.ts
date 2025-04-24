@@ -1,13 +1,11 @@
 import type { DataLoader } from "./DataLoader.js";
-import type { ContentDBConfig } from "./types";
+import type { ContentDBConfig, SourceConfig } from "./types";
 import { Indexer } from "./Indexer.js";
 import type { StorageProvider } from "./storage/StorageProvider";
 import {
-  resolveField,
-  unwrapSingleArray,
-  findEntriesByPartialKey,
-  buildForeignKeyMap,
   getAllFieldValues,
+  resolveDirectRelation,
+  resolveThroughRelation,
 } from "./utils.js";
 
 type Operator = "eq" | "contains" | "in";
@@ -63,11 +61,14 @@ export class QueryBuilder {
 
   /**
    * インデックスフィルタとフォールバックフィルタを抽出する
-   * @param sourceDef 
-   * @param indexMode 
+   * @param sourceDef
+   * @param indexMode
    * @returns { indexedFilters: Filter[], fallbackFilters: Filter[] }
    */
-  private extractIndexFilters(sourceDef: any, indexMode: indexMode): { indexedFilters: Filter[], fallbackFilters: Filter[] } {
+  private extractIndexFilters(
+    sourceDef: SourceConfig,
+    indexMode: indexMode
+  ): { indexedFilters: Filter[]; fallbackFilters: Filter[] } {
     const indexableFields = new Set(sourceDef.index ?? []);
     let indexedFilters: Filter[] = [];
     let fallbackFilters: Filter[] = [];
@@ -88,7 +89,10 @@ export class QueryBuilder {
     const indexMode: indexMode = this.optionsData?.indexMode ?? "none";
 
     // インデックスフィルタとフォールバックフィルタを抽出
-    const { indexedFilters, fallbackFilters } = this.extractIndexFilters(sourceDef, indexMode);
+    const { indexedFilters, fallbackFilters } = this.extractIndexFilters(
+      sourceDef,
+      indexMode
+    );
 
     const requiresJoin =
       fallbackFilters.some((f) => f.field.includes(".")) ||
@@ -97,7 +101,11 @@ export class QueryBuilder {
     let result: any[] = [];
     let matchedSlugs: string[] | null = null;
 
-    matchedSlugs = await this.getMatchedSlugsFromIndexFilters(indexedFilters, sourceDef, indexMode);
+    matchedSlugs = await this.getMatchedSlugsFromIndexFilters(
+      indexedFilters,
+      sourceDef,
+      indexMode
+    );
 
     // インデックスモードが "only" かつ一致するslugがなければ空配列を返す
     if (indexMode === "only" && (!matchedSlugs || matchedSlugs.length === 0)) {
@@ -127,8 +135,8 @@ export class QueryBuilder {
 
   /**
    * join（リレーション）処理を適用する
-   * @param result 
-   * @param sourceDef 
+   * @param result
+   * @param sourceDef
    * @returns Promise<any[]>
    */
   private async applyJoins(result: any[], sourceDef: any): Promise<any[]> {
@@ -145,50 +153,20 @@ export class QueryBuilder {
       if (isThrough) {
         // Through relation (hasOneThrough, hasManyThrough)
         const throughData = await this.loader.load(rel.through);
-        const throughMap = new Map(
-          throughData.map((row: any) => [
-            resolveField(row, rel.throughForeignKey) ?? "",
-            row,
-          ])
-        );
-
         const targetData = await this.loader.load(rel.to);
-        const targetMap = new Map(
-          targetData.map((row: any) => [
-            resolveField(row, rel.targetForeignKey) ?? "",
-            row,
-          ])
-        );
 
         result = result.map((row: any) => {
-          const sourceKey = resolveField(row, rel.sourceLocalKey);
-          if (!sourceKey)
-            return {
-              ...row,
-              [key]: rel.type === "hasManyThrough" ? [] : null,
-            };
-
-          const throughMatches = throughData.filter((t: any) =>
-            (resolveField(t, rel.throughForeignKey) ?? "")
-              .split(" ")
-              .includes(sourceKey)
+          const relValue = resolveThroughRelation(
+            row,
+            rel,
+            throughData,
+            targetData
           );
-
-          const targets = throughMatches
-            .map((t: any) => {
-              const throughKey = resolveField(t, rel.throughLocalKey);
-              return (throughKey ?? "")
-                .split(" ")
-                .map((k: string) => targetMap.get(k))
-                .filter((v: any) => v);
-            })
-            .flat();
-
           if (rel.type === "hasOneThrough") {
-            return { ...row, [key]: targets.length > 0 ? targets[0] : null };
+            return { ...row, [key]: relValue ?? null };
           } else {
             // hasManyThrough
-            return { ...row, [key]: targets };
+            return { ...row, [key]: relValue ?? [] };
           }
         });
       } else {
@@ -199,29 +177,16 @@ export class QueryBuilder {
         >;
         const foreignData = await this.loader.load(directRel.to);
 
-        // Use utility to build a Map from all possible foreignKey values to their parent object
-        const foreignMap = buildForeignKeyMap(
-          foreignData,
-          directRel.foreignKey
-        );
-
         result = result.map((row: any) => {
+          const relValue = resolveDirectRelation(row, directRel, foreignData);
           const relType = (directRel as any).type;
-          const localVal = resolveField(row, directRel.localKey) ?? "";
-          const keys = localVal.split(" ").filter(Boolean);
-          const matches = keys
-            .map((k: string) =>
-              unwrapSingleArray(findEntriesByPartialKey(foreignMap, k))
-            )
-            .filter((v: any) => v);
-
-          if (relType === "hasOne" || relType === "belongsTo") {
-            return { ...row, [key]: matches.length > 0 ? matches[0] : null };
+          if (relType === "hasOne") {
+            return { ...row, [key]: relValue ?? null };
           } else if (relType === "hasMany") {
-            return { ...row, [key]: matches };
+            return { ...row, [key]: relValue ?? [] };
           } else {
             // Default: array for backward compatibility
-            return { ...row, [key]: matches };
+            return { ...row, [key]: relValue ?? [] };
           }
         });
       }
@@ -231,11 +196,14 @@ export class QueryBuilder {
 
   /**
    * フィルタ適用（fallbackFilters）を行う
-   * @param result 
-   * @param fallbackFilters 
+   * @param result
+   * @param fallbackFilters
    * @returns any[]
    */
-  private applyFallbackFilters(result: any[], fallbackFilters: Filter[]): any[] {
+  private applyFallbackFilters(
+    result: any[],
+    fallbackFilters: Filter[]
+  ): any[] {
     for (const filter of fallbackFilters) {
       const { field, op, value } = filter;
       result = result.filter((row: any) => {
@@ -255,9 +223,9 @@ export class QueryBuilder {
   }
   /**
    * インデックスフィルタから一致するslugリストを抽出する
-   * @param indexedFilters 
-   * @param sourceDef 
-   * @param indexMode 
+   * @param indexedFilters
+   * @param sourceDef
+   * @param indexMode
    * @returns string[] | null
    */
   private async getMatchedSlugsFromIndexFilters(
@@ -265,7 +233,9 @@ export class QueryBuilder {
     sourceDef: any,
     indexMode: indexMode
   ): Promise<string[] | null> {
-    if (!(indexedFilters.length > 0 && indexMode !== "none" && sourceDef.index)) {
+    if (
+      !(indexedFilters.length > 0 && indexMode !== "none" && sourceDef.index)
+    ) {
       return null;
     }
     const indexDir = this.optionsData.indexDir || "output";

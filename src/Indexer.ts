@@ -1,15 +1,22 @@
 import { DataLoader } from "./DataLoader.js";
-import { ContentDBConfig } from "./types";
+import { ContentDBConfig, SourceConfig } from "./types";
 import type { StorageProvider } from "./storage/StorageProvider";
 import {
   resolveField,
   unwrapSingleArray,
   findEntriesByPartialKey,
   extractNestedProperty,
-  buildForeignKeyMap,
   ensureDir,
+  resolveDirectRelation,
+  resolveThroughRelation,
 } from "./utils.js";
 
+/**
+ * Indexer: インデックス・メタファイル生成の中核クラス
+ * - 各sourceのデータからインデックス/メタファイルを生成
+ * - 多段リレーション・ドット記法・型安全なmeta抽出をサポート
+ * - 共通化されたリレーション解決ロジックを利用
+ */
 export class Indexer {
   private loader: DataLoader;
   private config: ContentDBConfig;
@@ -20,6 +27,10 @@ export class Indexer {
     this.config = config;
   }
 
+  /**
+   * 全sourceについてインデックス用レコード配列を生成し、キャッシュする
+   * @returns sourceNameごとのインデックスレコード配列
+   */
   async buildAll(): Promise<Record<string, any[]>> {
     if (this.cache) return this.cache;
 
@@ -27,20 +38,25 @@ export class Indexer {
 
     for (const [sourceName, sourceDef] of Object.entries(this.config.sources)) {
       if (!sourceDef.index) continue;
+
       result[sourceName] = await this.buildSourceIndex(sourceName, sourceDef);
     }
 
     this.cache = result;
+
     return result;
   }
 
   /**
    * 1つのsourceについてインデックス用レコード配列を生成する
-   * @param sourceName 
-   * @param sourceDef 
+   * @param sourceName
+   * @param sourceDef
    * @returns Promise<any[]>
    */
-  private async buildSourceIndex(sourceName: string, sourceDef: any): Promise<any[]> {
+  private async buildSourceIndex(
+    sourceName: string,
+    sourceDef: SourceConfig
+  ): Promise<any[]> {
     let data = await this.loader.load(sourceName);
 
     const joins = Object.keys(sourceDef.relations ?? {});
@@ -58,13 +74,13 @@ export class Indexer {
         const throughData = await this.loader.load(rel.through);
         const targetData = await this.loader.load(rel.to);
         const targetMap = new Map(
-          targetData.map((row: any) => [
+          targetData.map((row) => [
             resolveField(row, rel.targetForeignKey) ?? "",
             row,
           ])
         );
 
-        data = data.map((row: any) => {
+        data = data.map((row) => {
           const sourceKey = resolveField(row, rel.sourceLocalKey);
           if (!sourceKey)
             return {
@@ -151,6 +167,12 @@ export class Indexer {
     return records;
   }
 
+  /**
+   * 全sourceのインデックス/メタファイルを指定ディレクトリに出力する
+   * @param outputDir - 出力先ディレクトリ
+   * @returns void
+   * @throws ストレージ書き込み失敗時に例外
+   */
   async saveTo(outputDir: string): Promise<void> {
     const all = await this.buildAll();
     // Provider経由でファイル出力
@@ -260,7 +282,11 @@ export class Indexer {
   }
 
   /**
-   * Extracts meta fields for a row, handling relations and dot notation.
+   * 1レコードのmeta情報をリレーション・ドット記法含めて抽出する
+   * @param row - 対象データレコード
+   * @param sourceDef - source定義
+   * @param relationData - 事前ロード済みのリレーションデータ
+   * @returns meta情報オブジェクト
    */
   private extractMetaForRow(
     row: any,
@@ -287,13 +313,18 @@ export class Indexer {
           "through" in rel &&
           (rel.type === "hasOneThrough" || rel.type === "hasManyThrough")
         ) {
-          relValue = this.resolveThroughRelation(
+          relValue = resolveThroughRelation(
             row,
             rel,
-            relationData[relKey]
+            relationData[relKey].throughData,
+            relationData[relKey].targetData
           );
         } else {
-          relValue = this.resolveDirectRelation(row, rel, relationData[relKey]);
+          relValue = resolveDirectRelation(
+            row,
+            rel,
+            relationData[relKey].foreignData
+          );
         }
 
         // Now, access the nested property using the utility
@@ -324,9 +355,18 @@ export class Indexer {
           "through" in rel &&
           (rel.type === "hasOneThrough" || rel.type === "hasManyThrough")
         ) {
-          relValue = this.resolveThroughRelation(row, rel, relationData[field]);
+          relValue = resolveThroughRelation(
+            row,
+            rel,
+            relationData[field].throughData,
+            relationData[field].targetData
+          );
         } else {
-          relValue = this.resolveDirectRelation(row, rel, relationData[field]);
+          relValue = resolveDirectRelation(
+            row,
+            rel,
+            relationData[field].foreignData
+          );
         }
         if (rel.type === "hasOneThrough" || rel.type === "hasOne") {
           metaObj[field] = relValue ?? null;
@@ -339,76 +379,5 @@ export class Indexer {
       }
     }
     return metaObj;
-  }
-
-  /**
-   * Resolves a direct relation for a row.
-   */
-  private resolveDirectRelation(row: any, rel: any, relationData: any): any {
-    const directRel = rel as Extract<
-      typeof rel,
-      { localKey: string; foreignKey: string }
-    >;
-    const { foreignData } = relationData;
-    const foreignMap = buildForeignKeyMap(foreignData, directRel.foreignKey);
-    const relType = (directRel as any).type;
-    const localVal = (resolveField(row, directRel.localKey) ?? "") as string;
-    const keys = localVal.split(" ").filter(Boolean);
-
-    // For each key, get all matching arrays of objects, flatten, and deduplicate
-    const matches = keys
-      .map((k: string) => findEntriesByPartialKey(foreignMap, k))
-      .flat()
-      .filter((v: any) => v);
-
-    if (relType === "hasOne") {
-      // If the first match is an array, return the array; else, return first match or null
-      if (matches.length > 0 && Array.isArray(matches[0])) {
-        return matches[0];
-      }
-      return matches.length > 0 ? matches[0] : null;
-    } else if (relType === "hasMany") {
-      return matches;
-    } else {
-      return matches;
-    }
-  }
-
-  /**
-   * Resolves a through relation for a row.
-   */
-  private resolveThroughRelation(row: any, rel: any, relationData: any): any {
-    const { throughData, targetData } = relationData;
-    const sourceKey = (resolveField(row, rel.sourceLocalKey) ?? "") as string;
-    const throughMatches = throughData.filter((t: any) =>
-      ((resolveField(t, rel.throughForeignKey) ?? "") as string)
-        .split(" ")
-        .includes(sourceKey)
-    );
-    const targetMap = new Map<string, any>(
-      targetData.map((r: any) => [
-        resolveField(r, rel.targetForeignKey) ?? "",
-        r,
-      ])
-    );
-    const targets = throughMatches
-      .map((t: any) => {
-        const throughKey = (resolveField(t, rel.throughLocalKey) ??
-          "") as string;
-        return throughKey
-          .split(" ")
-          .map((k: string) => targetMap.get(k))
-          .filter((v: any) => v);
-      })
-      .flat();
-    if (rel.type === "hasOneThrough") {
-      // If the first target is an array, return the array; else, return first target or null
-      if (targets.length > 0 && Array.isArray(targets[0])) {
-        return targets[0];
-      }
-      return targets.length > 0 ? targets[0] : null;
-    } else {
-      return targets;
-    }
   }
 }

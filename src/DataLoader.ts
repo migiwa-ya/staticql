@@ -13,6 +13,12 @@ export class DataLoader {
     this.provider = provider;
   }
 
+  /**
+   * 指定した sourceName の全データをストレージからロードし、型バリデーション・キャッシュする
+   * @param sourceName - 設定で定義された source 名
+   * @returns データ配列
+   * @throws 未知の source 名やスキーマ不一致時に例外
+   */
   async load(sourceName: string): Promise<any[]> {
     if (this.cache.has(sourceName)) {
       return this.cache.get(sourceName)!;
@@ -23,7 +29,7 @@ export class DataLoader {
 
     const files = await this.provider.listFiles(source.path);
     const parsed = await Promise.all(
-      files.map((f: string) => this.parseFile(f, source, f))
+      files.map((f) => this.parseFile(f, source, f))
     );
 
     const flattened =
@@ -33,9 +39,17 @@ export class DataLoader {
 
     source.schema.parse(flattened);
     this.cache.set(sourceName, flattened);
+
     return flattened;
   }
 
+  /**
+   * 指定した sourceName, slug から1件のデータをロードし、型バリデーションする
+   * @param sourceName - 設定で定義された source 名
+   * @param slug - ファイル名等から生成される一意な識別子
+   * @returns データオブジェクト
+   * @throws 未知の source 名やファイル未発見・スキーマ不一致時に例外
+   */
   async loadBySlug(sourceName: string, slug: string): Promise<any> {
     const source = this.config.sources[sourceName];
     if (!source) throw new Error(`Unknown source: ${sourceName}`);
@@ -54,6 +68,14 @@ export class DataLoader {
     }
   }
 
+  /**
+   * 1ファイルをパースし、型・slug整合性を検証してデータオブジェクト化する
+   * @param filePath - ファイルのパス
+   * @param source - SourceConfig オブジェクト
+   * @param fullPath - 実際のファイルパス
+   * @returns パース済みデータ
+   * @throws サポート外のファイル種別やslug不整合時に例外
+   */
   private async parseFile(
     filePath: string,
     source: SourceConfig,
@@ -98,14 +120,23 @@ export class DataLoader {
     return parsed;
   }
 
-  // 拡張子取得（Node.js非依存）
+  /**
+   * パス文字列から拡張子を取得
+   * @param p - パス文字列
+   * @returns 拡張子（例: ".md"）
+   */
   private getExtname(p: string): string {
     const i = p.lastIndexOf(".");
     if (i === -1) return "";
     return p.slice(i);
   }
 
-  // slug生成（Node.js非依存）
+  /**
+   * ファイルパスからslug（論理ID）を生成（Node.js非依存）
+   * @param sourcePath - 設定で定義されたsourceのパス（glob含む）
+   * @param filePath - 実際のファイルパス
+   * @returns slug文字列（例: "matricaria-chamomilla"）
+   */
   private getSlugFromPath(sourcePath: string, filePath: string): string {
     // sourcePath例: "tests/content-fixtures/herbs/*.md"
     // filePath例: "tests/content-fixtures/herbs/matricaria-chamomilla.md"
@@ -120,7 +151,11 @@ export class DataLoader {
     return slug;
   }
 
-  // sourcePathからワイルドカードより前のディレクトリ部分を抽出
+  /**
+   * sourcePathからワイルドカードより前のディレクトリ部分を抽出
+   * @param globPath - globを含むパス
+   * @returns ディレクトリパス
+   */
   private extractBaseDir(globPath: string): string {
     const parts = globPath.split("/");
     const index = parts.findIndex((part) => part.includes("*"));
@@ -128,7 +163,12 @@ export class DataLoader {
     return parts.slice(0, index).join("/") + "/";
   }
 
-  // sourceGlob, relativePathから論理パスを生成
+  /**
+   * sourceGlob, relativePathから論理パスを生成
+   * @param sourceGlob - globを含むパス
+   * @param relativePath - 相対パス
+   * @returns 論理パス
+   */
   private resolveFilePath(sourceGlob: string, relativePath: string): string {
     const baseDir = this.extractBaseDir(sourceGlob);
     return baseDir + relativePath;
