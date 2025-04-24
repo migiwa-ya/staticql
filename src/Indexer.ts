@@ -27,119 +27,128 @@ export class Indexer {
 
     for (const [sourceName, sourceDef] of Object.entries(this.config.sources)) {
       if (!sourceDef.index) continue;
-
-      let data = await this.loader.load(sourceName);
-
-      const joins = Object.keys(sourceDef.relations ?? {});
-      for (const key of joins) {
-        const rel = sourceDef.relations![key];
-
-        // Type guard for through relation
-        const isThrough =
-          typeof rel === "object" &&
-          "through" in rel &&
-          (rel.type === "hasOneThrough" || rel.type === "hasManyThrough");
-
-        if (isThrough) {
-          // Through relation (hasOneThrough, hasManyThrough)
-          const throughData = await this.loader.load(rel.through);
-          const targetData = await this.loader.load(rel.to);
-          const targetMap = new Map(
-            targetData.map((row) => [
-              resolveField(row, rel.targetForeignKey) ?? "",
-              row,
-            ])
-          );
-
-          data = data.map((row) => {
-            const sourceKey = resolveField(row, rel.sourceLocalKey);
-            if (!sourceKey)
-              return {
-                ...row,
-                [key]: rel.type === "hasManyThrough" ? [] : null,
-              };
-
-            const throughMatches = throughData.filter((t) =>
-              (resolveField(t, rel.throughForeignKey) ?? "")
-                .split(" ")
-                .includes(sourceKey)
-            );
-
-            const targets = throughMatches
-              .map((t) => {
-                const throughKey = resolveField(t, rel.throughLocalKey);
-                return (throughKey ?? "")
-                  .split(" ")
-                  .map((k) => targetMap.get(k))
-                  .filter((v) => v);
-              })
-              .flat();
-
-            if (rel.type === "hasOneThrough") {
-              return { ...row, [key]: targets.length > 0 ? targets[0] : null };
-            } else {
-              // hasManyThrough
-              return { ...row, [key]: targets };
-            }
-          });
-        } else {
-          // Type guard for direct relation
-          const directRel = rel as Extract<
-            typeof rel,
-            { localKey: string; foreignKey: string }
-          >;
-          const foreignData = await this.loader.load(directRel.to);
-
-          const foreignMap = new Map(
-            foreignData.map((row) => [
-              resolveField(row, directRel.foreignKey) ?? "",
-              row,
-            ])
-          );
-
-          data = data.map((row) => {
-            const relType = (directRel as any).type;
-            const localVal = resolveField(row, directRel.localKey) ?? "";
-            const keys = localVal.split(" ").filter(Boolean);
-            const matches = keys
-              .map((k) =>
-                unwrapSingleArray(findEntriesByPartialKey(foreignMap, k))
-              )
-              .filter((v) => v);
-
-            if (relType === "hasOne") {
-              return { ...row, [key]: matches.length > 0 ? matches[0] : null };
-            } else if (relType === "hasMany") {
-              return { ...row, [key]: matches };
-            } else {
-              // Default: array for backward compatibility
-              return { ...row, [key]: matches };
-            }
-          });
-        }
-      }
-
-      const records = data.map((row) => {
-        const values: Record<string, string> = {};
-
-        for (const field of sourceDef.index!) {
-          const val = resolveField(row, field);
-          if (val != null && String(val)) {
-            values[field] = String(val);
-          }
-        }
-
-        return {
-          slug: row.slug,
-          values,
-        };
-      });
-
-      result[sourceName] = records;
+      result[sourceName] = await this.buildSourceIndex(sourceName, sourceDef);
     }
 
     this.cache = result;
     return result;
+  }
+
+  /**
+   * 1つのsourceについてインデックス用レコード配列を生成する
+   * @param sourceName 
+   * @param sourceDef 
+   * @returns Promise<any[]>
+   */
+  private async buildSourceIndex(sourceName: string, sourceDef: any): Promise<any[]> {
+    let data = await this.loader.load(sourceName);
+
+    const joins = Object.keys(sourceDef.relations ?? {});
+    for (const key of joins) {
+      const rel = sourceDef.relations![key];
+
+      // Type guard for through relation
+      const isThrough =
+        typeof rel === "object" &&
+        "through" in rel &&
+        (rel.type === "hasOneThrough" || rel.type === "hasManyThrough");
+
+      if (isThrough) {
+        // Through relation (hasOneThrough, hasManyThrough)
+        const throughData = await this.loader.load(rel.through);
+        const targetData = await this.loader.load(rel.to);
+        const targetMap = new Map(
+          targetData.map((row: any) => [
+            resolveField(row, rel.targetForeignKey) ?? "",
+            row,
+          ])
+        );
+
+        data = data.map((row: any) => {
+          const sourceKey = resolveField(row, rel.sourceLocalKey);
+          if (!sourceKey)
+            return {
+              ...row,
+              [key]: rel.type === "hasManyThrough" ? [] : null,
+            };
+
+          const throughMatches = throughData.filter((t: any) =>
+            (resolveField(t, rel.throughForeignKey) ?? "")
+              .split(" ")
+              .includes(sourceKey)
+          );
+
+          const targets = throughMatches
+            .map((t: any) => {
+              const throughKey = resolveField(t, rel.throughLocalKey);
+              return (throughKey ?? "")
+                .split(" ")
+                .map((k: string) => targetMap.get(k))
+                .filter((v: any) => v);
+            })
+            .flat();
+
+          if (rel.type === "hasOneThrough") {
+            return { ...row, [key]: targets.length > 0 ? targets[0] : null };
+          } else {
+            // hasManyThrough
+            return { ...row, [key]: targets };
+          }
+        });
+      } else {
+        // Type guard for direct relation
+        const directRel = rel as Extract<
+          typeof rel,
+          { localKey: string; foreignKey: string }
+        >;
+        const foreignData = await this.loader.load(directRel.to);
+
+        const foreignMap = new Map(
+          foreignData.map((row: any) => [
+            resolveField(row, directRel.foreignKey) ?? "",
+            row,
+          ])
+        );
+
+        data = data.map((row: any) => {
+          const relType = (directRel as any).type;
+          const localVal = resolveField(row, directRel.localKey) ?? "";
+          const keys = localVal.split(" ").filter(Boolean);
+          const matches = keys
+            .map((k: string) =>
+              unwrapSingleArray(findEntriesByPartialKey(foreignMap, k))
+            )
+            .filter((v: any) => v);
+
+          if (relType === "hasOne") {
+            return { ...row, [key]: matches.length > 0 ? matches[0] : null };
+          } else if (relType === "hasMany") {
+            return { ...row, [key]: matches };
+          } else {
+            // Default: array for backward compatibility
+            return { ...row, [key]: matches };
+          }
+        });
+      }
+    }
+
+    const records = data.map((row: any) => {
+      const values: Record<string, string> = {};
+
+      for (const field of sourceDef.index!) {
+        const val = resolveField(row, field);
+        if (val != null && String(val)) {
+          values[field] = String(val);
+        }
+      }
+
+      return {
+        slug: row.slug,
+        values,
+      };
+    });
+
+    return records;
   }
 
   async saveTo(outputDir: string): Promise<void> {
