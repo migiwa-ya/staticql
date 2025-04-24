@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import staticqlConfig from "./staticql.config";
+import { HerbsRecord, ReportsRecord } from "./types/staticql-types";
 
 const db = staticqlConfig;
 
@@ -21,7 +22,7 @@ describe("QueryBuilder with index optimization", () => {
 
   it("should find herbs by partial match using contains", async () => {
     const result = await db
-      .from("herbs")
+      .from<HerbsRecord>("herbs")
       .where("name", "contains", "ペパーミント")
       .options({ indexMode: "none" })
       .exec();
@@ -41,26 +42,26 @@ describe("QueryBuilder with index optimization", () => {
   });
 
   it("should support indexed nested field (herbState.name)", async () => {
-    const result = await db
-      .from("herbs")
+    const herbs = await db
+      .from<HerbsRecord>("herbs")
       .join("herbState")
       .where("herbState.name", "eq", "乾燥")
       .options({ indexMode: "none" })
       .exec();
 
-    expect(result.length).toBeGreaterThan(0);
-    expect(result[0].herbState.name).toBe("乾燥");
+    expect(herbs.length).toBeGreaterThan(0);
+    expect(herbs[0].herbState?.name).toBe("乾燥");
   });
 
   it("should filter reports by joined herb name", async () => {
-    const result = await db
-      .from("reports")
+    const reports = await db
+      .from<ReportsRecord>("reports")
       .join("herbs")
       .where("herbs.name", "eq", "ペパーミント")
       .options({ indexMode: "none" })
       .exec();
 
-    expect(result.length).toBe(2);
-    expect(result[0].herbs[0].slug).toBe("mentha-piperita");
+    expect(reports.length).toBe(2);
+    expect(reports[0]?.herbs![0].slug).toBe("mentha-piperita");
   });
 });

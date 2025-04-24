@@ -1,5 +1,5 @@
 import { DataLoader } from "./DataLoader.js";
-import { ContentDBConfig, SourceConfig } from "./types";
+import { ContentDBConfig, SourceRecord, SourceConfig } from "./types";
 import type { StorageProvider } from "./storage/StorageProvider";
 import {
   resolveField,
@@ -17,12 +17,12 @@ import {
  * - 多段リレーション・ドット記法・型安全なmeta抽出をサポート
  * - 共通化されたリレーション解決ロジックを利用
  */
-export class Indexer {
-  private loader: DataLoader;
+export class Indexer<T extends SourceRecord = SourceRecord> {
+  private loader: DataLoader<T>;
   private config: ContentDBConfig;
-  private cache: Record<string, any[]> | null = null;
+  private cache: Record<string, T[]> | null = null;
 
-  constructor(loader: DataLoader, config: ContentDBConfig) {
+  constructor(loader: DataLoader<T>, config: ContentDBConfig) {
     this.loader = loader;
     this.config = config;
   }
@@ -175,6 +175,7 @@ export class Indexer {
    */
   async saveTo(outputDir: string): Promise<void> {
     const all = await this.buildAll();
+
     // Provider経由でファイル出力
     const provider: StorageProvider = (this.loader as any).provider;
 
@@ -190,6 +191,7 @@ export class Indexer {
               /\/$/,
               ""
             )}/${sourceName}/index-${field}`;
+
             // ローカルファイルシステム時のみensureDir
             if (
               (provider as any).type === "filesystem" ||
@@ -197,6 +199,7 @@ export class Indexer {
             ) {
               await ensureDir(dirPath);
             }
+
             // key_valueごとにファイルを分割出力
             const keyMap: Record<string, string[]> = {};
             for (const rec of records) {
@@ -208,6 +211,7 @@ export class Indexer {
                 keyMap[v].push(rec.slug);
               }
             }
+
             for (const [keyValue, slugs] of Object.entries(keyMap)) {
               const filePath = `${dirPath}/${keyValue}.json`;
               await provider.writeFile(
@@ -218,6 +222,7 @@ export class Indexer {
           } else {
             // 従来方式: {source_name}.index-{field}.json
             const indexMap: Record<string, string[]> = {};
+
             for (const rec of records) {
               const value = rec.values[field];
               if (value == null) continue;
@@ -228,10 +233,12 @@ export class Indexer {
                 indexMap[v].push(rec.slug);
               }
             }
+
             const filePath = `${outputDir.replace(
               /\/$/,
               ""
             )}/${sourceName}.index-${field}.json`;
+
             await provider.writeFile(
               filePath,
               JSON.stringify(indexMap, null, 2)
@@ -248,9 +255,11 @@ export class Indexer {
 
         // Preload all relation data for efficiency
         const relationData: Record<string, any> = {};
+
         if (sourceDef.relations) {
           for (const relKey of Object.keys(sourceDef.relations)) {
             const rel = sourceDef.relations[relKey];
+
             if (
               "through" in rel &&
               (rel.type === "hasOneThrough" || rel.type === "hasManyThrough")
@@ -276,6 +285,7 @@ export class Indexer {
           /\/$/,
           ""
         )}/${sourceName}.meta.json`;
+
         await provider.writeFile(filePath, JSON.stringify(metaMap, null, 2));
       }
     }
@@ -337,6 +347,7 @@ export class Indexer {
         } else {
           // If the relation is missing, output an empty array for hasMany, or undefined for hasOne
           const relConfig = sourceDef.relations && sourceDef.relations[relKey];
+
           if (
             relConfig &&
             (relConfig.type === "hasMany" ||
@@ -351,6 +362,7 @@ export class Indexer {
         // Top-level relation (no dot)
         const rel = sourceDef.relations[field];
         let relValue: any;
+
         if (
           "through" in rel &&
           (rel.type === "hasOneThrough" || rel.type === "hasManyThrough")
@@ -368,6 +380,7 @@ export class Indexer {
             relationData[field].foreignData
           );
         }
+
         if (rel.type === "hasOneThrough" || rel.type === "hasOne") {
           metaObj[field] = relValue ?? null;
         } else {
@@ -378,6 +391,7 @@ export class Indexer {
         metaObj[field] = row[field];
       }
     }
+
     return metaObj;
   }
 }

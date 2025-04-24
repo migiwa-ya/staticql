@@ -1,6 +1,12 @@
 import { promises as fs } from "fs";
 import * as path from "path";
 
+/**
+ * オブジェクトからドット記法のパスで値を抽出し、文字列として返す
+ * @param obj - 対象オブジェクト
+ * @param fieldPath - ドット区切りのパス（例: "a.b.c"）
+ * @returns 値が存在すれば文字列、なければ undefined
+ */
 export function resolveField(obj: any, fieldPath: string): string | undefined {
   const segments = fieldPath.split(".");
   let value: any = obj;
@@ -24,7 +30,12 @@ export function resolveField(obj: any, fieldPath: string): string | undefined {
   return String(value);
 }
 
-// Returns all primitive values at a given path, flattening arrays
+/**
+ * オブジェクトからドット記法のパスで全ての値（配列も含む）を抽出し、文字列配列として返す
+ * @param obj - 対象オブジェクト
+ * @param fieldPath - ドット区切りのパス（例: "a.b.c"）
+ * @returns すべての値を文字列配列で返す（存在しない場合は空配列）
+ */
 export function getAllFieldValues(obj: any, fieldPath: string): string[] {
   const segments = fieldPath.split(".");
   let values: any[] = [obj];
@@ -47,7 +58,10 @@ export function getAllFieldValues(obj: any, fieldPath: string): string[] {
 }
 
 /**
- * Builds a Map from all possible values at a (possibly array) foreignKey path to an array of their parent objects.
+ * 配列データから指定パスの値ごとに親オブジェクト配列をMap化する
+ * @param data - 対象データ配列
+ * @param foreignKeyPath - ドット区切りのパス（例: "a.b.c"）
+ * @returns Map<値, 親オブジェクト配列>
  */
 export function buildForeignKeyMap(data: any[], foreignKeyPath: string): Map<string, any[]> {
   const map = new Map<string, any[]>();
@@ -64,9 +78,10 @@ export function buildForeignKeyMap(data: any[], foreignKeyPath: string): Map<str
 }
 
 /**
- * Extracts all values at a nested property path from an object or array of objects.
- * Returns a flat array of all values found at the path.
- * Example: extractNestedProperty([{a: {b: 1}}, {a: {b: 2}}], ['a', 'b']) => [1, 2]
+ * オブジェクトまたは配列からネストしたプロパティパスの全値を抽出し、フラットな配列で返す
+ * @param objOrArray - 対象オブジェクトまたはオブジェクト配列
+ * @param path - プロパティパス配列（例: ['a', 'b']）
+ * @returns パス上の全ての値をフラットな配列で返す
  */
 export function extractNestedProperty(objOrArray: any, path: string[]): any[] {
   if (!Array.isArray(objOrArray)) objOrArray = [objOrArray];
@@ -84,6 +99,11 @@ export function extractNestedProperty(objOrArray: any, path: string[]): any[] {
   return results.flat(Infinity).filter((v) => v !== undefined && v !== null);
 }
 
+/**
+ * 配列で要素数が1の場合は再帰的に中身を取り出す
+ * @param value - 任意の値または配列
+ * @returns 配列で要素数1なら中身、そうでなければそのまま
+ */
 export function unwrapSingleArray(value: any) {
   while (Array.isArray(value) && value.length === 1) {
     value = value[0];
@@ -92,11 +112,11 @@ export function unwrapSingleArray(value: any) {
 }
 
 /**
- * Resolves a direct relation for a row (hasOne/hasMany).
- * @param row - The source row object
- * @param rel - The relation definition (must have localKey, foreignKey, type)
- * @param foreignData - Array of target objects
- * @returns Related object(s) or null/[]
+ * 直接リレーション（hasOne/hasMany等）を解決し、関連オブジェクトを返す
+ * @param row - 対象レコード
+ * @param rel - リレーション定義（localKey, foreignKey, type等を含む）
+ * @param foreignData - 参照先データ配列
+ * @returns 関連オブジェクト（hasOneは1件またはnull、hasManyは配列）
  */
 export function resolveDirectRelation(
   row: any,
@@ -127,12 +147,12 @@ export function resolveDirectRelation(
 }
 
 /**
- * Resolves a through relation for a row (hasOneThrough/hasManyThrough).
- * @param row - The source row object
- * @param rel - The relation definition (must have through, throughLocalKey, throughForeignKey, targetForeignKey, type)
- * @param throughData - Array of through objects
- * @param targetData - Array of target objects
- * @returns Related object(s) or null/[]
+ * 中間テーブル（through）を介したリレーション（hasOneThrough/hasManyThrough等）を解決
+ * @param row - 対象レコード
+ * @param rel - リレーション定義（through, throughLocalKey, throughForeignKey, targetForeignKey, type等を含む）
+ * @param throughData - 中間テーブルデータ配列
+ * @param targetData - 参照先データ配列
+ * @returns 関連オブジェクト（hasOneThroughは1件またはnull、hasManyThroughは配列）
  */
 export function resolveThroughRelation(
   row: any,
@@ -171,6 +191,13 @@ export function resolveThroughRelation(
   }
 }
 
+/**
+ * Mapのキー部分一致で値を抽出する
+ * @param map - 検索対象のMap
+ * @param keyword - 部分一致させるキーワード
+ * @param options - caseInsensitive: 大文字小文字を無視する場合true
+ * @returns 部分一致した値の配列
+ */
 export function findEntriesByPartialKey<K extends string | undefined, V>(
   map: Map<K, V>,
   keyword: string,
@@ -187,6 +214,13 @@ export function findEntriesByPartialKey<K extends string | undefined, V>(
 
 /**
  * 指定ディレクトリがなければ再帰的に作成する
+ * @param dirPath - ディレクトリパス
+ * @returns Promise<void>
+ */
+/**
+ * 指定ディレクトリがなければ再帰的に作成する
+ * @param dirPath - ディレクトリパス
+ * @returns Promise<void>
  */
 export async function ensureDir(dirPath: string): Promise<void> {
   await fs.mkdir(dirPath, { recursive: true });

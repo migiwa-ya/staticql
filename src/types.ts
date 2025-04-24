@@ -9,29 +9,23 @@ export type SourceConfig = {
   index?: string[];
   meta?: string[];
   relations?: Record<string, RelationConfig>;
-  /**
-   * インデックスファイルをキーごとに分割する場合はtrue
-   * 未指定時は従来通り全件1ファイル
-   */
   splitIndexByKey?: boolean;
 };
 
 export type RelationConfig =
   | {
-      // Direct relation (hasOne, hasMany)
       to: string;
       localKey: string;
       foreignKey: string;
       type?: "hasOne" | "hasMany";
     }
   | {
-      // Through relation (hasOneThrough, hasManyThrough)
-      to: string; // Target model
-      through: string; // Intermediate model
-      sourceLocalKey: string; // Key on source to match with through
-      throughForeignKey: string; // Key on through to match with source
-      throughLocalKey: string; // Key on through to match with target
-      targetForeignKey: string; // Key on target to match with through
+      to: string;
+      through: string;
+      sourceLocalKey: string;
+      throughForeignKey: string;
+      throughLocalKey: string;
+      targetForeignKey: string;
       type: "hasOneThrough" | "hasManyThrough";
     };
 
@@ -44,4 +38,8 @@ export type StorageConfig =
 export type ContentDBConfig = {
   sources: Record<string, SourceConfig>;
   storage?: StorageConfig;
+};
+
+export type SourceRecord = {
+  slug: string;
 };

@@ -1,6 +1,5 @@
 import type { DataLoader } from "./DataLoader.js";
 import type { ContentDBConfig, SourceConfig } from "./types";
-import { Indexer } from "./Indexer.js";
 import type { StorageProvider } from "./storage/StorageProvider";
 import {
   getAllFieldValues,
@@ -16,10 +15,10 @@ type Filter =
 
 type indexMode = "only" | "none";
 
-export class QueryBuilder {
+export class QueryBuilder<T> {
   private sourceName: string;
   private config: ContentDBConfig;
-  private loader: DataLoader;
+  private loader: DataLoader<T>;
   private joins: string[] = [];
   private filters: Filter[] = [];
   private optionsData: { indexMode?: indexMode; indexDir?: string } = {};
@@ -27,9 +26,8 @@ export class QueryBuilder {
   constructor(
     sourceName: string,
     config: ContentDBConfig,
-    loader: DataLoader,
-    joins: string[] = [],
-    private indexer?: Indexer
+    loader: DataLoader<T>,
+    joins: string[] = []
   ) {
     this.sourceName = sourceName;
     this.config = config;
@@ -37,18 +35,41 @@ export class QueryBuilder {
     this.joins = joins;
   }
 
-  join(relationKey: string): QueryBuilder {
+  /**
+   * リレーション（join）を追加する
+   * @param relationKey - 設定で定義されたリレーション名
+   * @returns this（メソッドチェーン可）
+   */
+  join(relationKey: string): QueryBuilder<T> {
     this.joins = [...this.joins, relationKey];
+
     return this;
   }
 
-  where(field: string, op: "eq" | "contains", value: string): QueryBuilder;
-  where(field: string, op: "in", value: string[]): QueryBuilder;
-  where(field: string, op: Operator, value: string | string[]): QueryBuilder {
+  /**
+   * フィールド・演算子・値でフィルタ条件を追加する
+   * @param field - フィルタ対象フィールド名
+   * @param op - 演算子（"eq"|"contains"|"in"）
+   * @param value - 比較値
+   * @returns this（メソッドチェーン可）
+   */
+  where(field: string, op: "eq" | "contains", value: string): QueryBuilder<T>;
+  where(field: string, op: "in", value: string[]): QueryBuilder<T>;
+  where(
+    field: string,
+    op: Operator,
+    value: string | string[]
+  ): QueryBuilder<T> {
     this.filters.push({ field, op, value } as Filter);
+
     return this;
   }
 
+  /**
+   * クエリ実行時のオプション（インデックスモードや出力ディレクトリ）を指定する
+   * @param opts - オプションオブジェクト
+   * @returns this（メソッドチェーン可）
+   */
   options(opts: { indexMode: "only"; indexDir: string }): this;
   options(opts: { indexMode: "none" }): this;
   options(opts: { indexMode?: indexMode; indexDir?: string }): this {
@@ -56,6 +77,7 @@ export class QueryBuilder {
       ...this.optionsData,
       ...opts,
     };
+
     return this;
   }
 
@@ -81,10 +103,16 @@ export class QueryBuilder {
         (f) => !indexableFields.has(f.field)
       );
     }
+
     return { indexedFilters, fallbackFilters };
   }
 
-  async exec(): Promise<any[]> {
+  /**
+   * クエリを実行し、条件に合致したデータ配列を返す
+   * @returns クエリ結果のデータ配列
+   * @throws 設定・データ不整合時に例外
+   */
+  async exec(): Promise<T[]> {
     const sourceDef = this.config.sources[this.sourceName];
     const indexMode: indexMode = this.optionsData?.indexMode ?? "none";
 
@@ -98,7 +126,7 @@ export class QueryBuilder {
       fallbackFilters.some((f) => f.field.includes(".")) ||
       this.joins.length > 0;
 
-    let result: any[] = [];
+    let result: T[] = [];
     let matchedSlugs: string[] | null = null;
 
     matchedSlugs = await this.getMatchedSlugsFromIndexFilters(
@@ -137,9 +165,9 @@ export class QueryBuilder {
    * join（リレーション）処理を適用する
    * @param result
    * @param sourceDef
-   * @returns Promise<any[]>
+   * @returns Promise<T[]>
    */
-  private async applyJoins(result: any[], sourceDef: any): Promise<any[]> {
+  private async applyJoins(result: T[], sourceDef: any): Promise<T[]> {
     for (const key of this.joins) {
       const rel = sourceDef.relations?.[key];
       if (!rel) throw new Error(`Unknown relation: ${key}`);
@@ -155,13 +183,14 @@ export class QueryBuilder {
         const throughData = await this.loader.load(rel.through);
         const targetData = await this.loader.load(rel.to);
 
-        result = result.map((row: any) => {
+        result = result.map((row) => {
           const relValue = resolveThroughRelation(
             row,
             rel,
             throughData,
             targetData
           );
+
           if (rel.type === "hasOneThrough") {
             return { ...row, [key]: relValue ?? null };
           } else {
@@ -177,20 +206,21 @@ export class QueryBuilder {
         >;
         const foreignData = await this.loader.load(directRel.to);
 
-        result = result.map((row: any) => {
+        result = result.map((row) => {
           const relValue = resolveDirectRelation(row, directRel, foreignData);
           const relType = (directRel as any).type;
+
           if (relType === "hasOne") {
             return { ...row, [key]: relValue ?? null };
           } else if (relType === "hasMany") {
             return { ...row, [key]: relValue ?? [] };
           } else {
-            // Default: array for backward compatibility
             return { ...row, [key]: relValue ?? [] };
           }
         });
       }
     }
+
     return result;
   }
 
@@ -198,29 +228,33 @@ export class QueryBuilder {
    * フィルタ適用（fallbackFilters）を行う
    * @param result
    * @param fallbackFilters
-   * @returns any[]
+   * @returns T[]
    */
-  private applyFallbackFilters(
-    result: any[],
-    fallbackFilters: Filter[]
-  ): any[] {
+  private applyFallbackFilters(result: T[], fallbackFilters: Filter[]): T[] {
     for (const filter of fallbackFilters) {
       const { field, op, value } = filter;
-      result = result.filter((row: any) => {
+
+      result = result.filter((row) => {
         const vals = getAllFieldValues(row, field);
+
         if (vals.length === 0) return false;
         if (op === "eq") return vals[0] === value;
         if (op === "contains")
           return vals.some((v: string) => v.includes(value));
+
         if (op === "in") {
           if (!Array.isArray(value)) return false;
+
           return vals.some((v: string) => value.includes(v));
         }
+
         return false;
       });
     }
+
     return result;
   }
+
   /**
    * インデックスフィルタから一致するslugリストを抽出する
    * @param indexedFilters
@@ -238,7 +272,9 @@ export class QueryBuilder {
     ) {
       return null;
     }
+
     const indexDir = this.optionsData.indexDir || "output";
+
     let indexSlugs: string[] | null = null;
 
     for (const filter of indexedFilters) {
@@ -247,19 +283,24 @@ export class QueryBuilder {
       let matched: string[] = [];
 
       if (sourceDef.splitIndexByKey) {
-        // 分割インデックス方式
+        // 分割インデックスファイル方式
+
         const dirPath = `${indexDir}/${this.sourceName}/index-${field}`;
+
         if (op === "eq") {
           const keyValue = String(value);
           const filePath = `${dirPath}/${keyValue}.json`;
+
           try {
             let raw = await provider.readFile(filePath);
             let fileContent: string;
+
             if (raw instanceof Uint8Array) {
               fileContent = new TextDecoder().decode(raw);
             } else {
               fileContent = raw;
             }
+
             matched = JSON.parse(fileContent);
           } catch {
             matched = [];
@@ -267,14 +308,17 @@ export class QueryBuilder {
         } else if (op === "in" && Array.isArray(value)) {
           for (const keyValue of value) {
             const filePath = `${dirPath}/${keyValue}.json`;
+
             try {
               let raw = await provider.readFile(filePath);
               let fileContent: string;
+
               if (raw instanceof Uint8Array) {
                 fileContent = new TextDecoder().decode(raw);
               } else {
                 fileContent = raw;
               }
+
               matched.push(...JSON.parse(fileContent));
             } catch {
               // skip missing
@@ -283,6 +327,7 @@ export class QueryBuilder {
         } else if (op === "contains") {
           // containsの場合は全ファイルをリストアップして部分一致検索
           let files: string[] = [];
+
           try {
             files = await provider.listFiles(
               `${indexDir}/${this.sourceName}/index-${field}/`
@@ -290,17 +335,21 @@ export class QueryBuilder {
           } catch {
             files = [];
           }
+
           for (const file of files) {
             const key = file.replace(/^.*\//, "").replace(/\.json$/, "");
+
             if (key.includes(String(value))) {
               try {
                 let raw = await provider.readFile(file);
                 let fileContent: string;
+
                 if (raw instanceof Uint8Array) {
                   fileContent = new TextDecoder().decode(raw);
                 } else {
                   fileContent = raw;
                 }
+
                 matched.push(...JSON.parse(fileContent));
               } catch {
                 // skip missing
@@ -309,17 +358,20 @@ export class QueryBuilder {
           }
         }
       } else {
-        // 従来方式
+        // 単一インデックスファイル方式
         let indexMap: Record<string, string[]> | null = null;
         const filePath = `${indexDir}/${this.sourceName}.index-${field}.json`;
+
         try {
           let raw = await provider.readFile(filePath);
           let fileContent: string;
+
           if (raw instanceof Uint8Array) {
             fileContent = new TextDecoder().decode(raw);
           } else {
             fileContent = raw;
           }
+
           indexMap = JSON.parse(fileContent);
         } catch {
           indexMap = null;
@@ -328,11 +380,13 @@ export class QueryBuilder {
         if (indexMap) {
           if (op === "eq") {
             const countMap: any = {};
+
             for (const items of Object.values(indexMap)) {
               for (const id of items) {
                 countMap[id] = (countMap[id] || 0) + 1;
               }
             }
+
             matched = indexMap[String(value)].filter(
               (id) => countMap[id] === 1
             );
@@ -356,6 +410,7 @@ export class QueryBuilder {
     if (!matchedSlugs || matchedSlugs.length === 0) {
       return null;
     }
+
     return matchedSlugs;
   }
 }

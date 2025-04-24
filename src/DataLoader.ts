@@ -3,10 +3,10 @@ import yaml from "js-yaml";
 import type { ContentDBConfig, SourceConfig } from "./types";
 import type { StorageProvider } from "./storage/StorageProvider";
 
-export class DataLoader {
+export class DataLoader<T = unknown> {
   private config: ContentDBConfig;
   private provider: StorageProvider;
-  private cache: Map<string, any[]> = new Map();
+  private cache: Map<string, T[]> = new Map();
 
   constructor(config: ContentDBConfig, provider: StorageProvider) {
     this.config = config;
@@ -19,7 +19,7 @@ export class DataLoader {
    * @returns データ配列
    * @throws 未知の source 名やスキーマ不一致時に例外
    */
-  async load(sourceName: string): Promise<any[]> {
+  async load(sourceName: string): Promise<T[]> {
     if (this.cache.has(sourceName)) {
       return this.cache.get(sourceName)!;
     }
@@ -38,9 +38,9 @@ export class DataLoader {
         : parsed;
 
     source.schema.parse(flattened);
-    this.cache.set(sourceName, flattened);
+    this.cache.set(sourceName, flattened as T[]);
 
-    return flattened;
+    return flattened as T[];
   }
 
   /**
@@ -50,7 +50,7 @@ export class DataLoader {
    * @returns データオブジェクト
    * @throws 未知の source 名やファイル未発見・スキーマ不一致時に例外
    */
-  async loadBySlug(sourceName: string, slug: string): Promise<any> {
+  async loadBySlug(sourceName: string, slug: string): Promise<T> {
     const source = this.config.sources[sourceName];
     if (!source) throw new Error(`Unknown source: ${sourceName}`);
 
@@ -62,6 +62,7 @@ export class DataLoader {
     try {
       const parsed = await this.parseFile(filePath, source, filePath);
       source.schema.parse([parsed]);
+
       return parsed;
     } catch (err) {
       throw new Error(`Failed to loadBySlug: ${filePath} — ${err}`);
@@ -80,14 +81,14 @@ export class DataLoader {
     filePath: string,
     source: SourceConfig,
     fullPath: string
-  ): Promise<any> {
+  ): Promise<T> {
     const ext = this.getExtname(fullPath);
     let raw = await this.provider.readFile(fullPath);
     if (raw instanceof Uint8Array) {
       raw = new TextDecoder().decode(raw);
     }
 
-    let parsed: any;
+    let parsed: unknown;
 
     if (source.type === "markdown") {
       const { data, content } = matter(raw);
@@ -108,16 +109,20 @@ export class DataLoader {
     ) {
       const slugFromPath = this.getSlugFromPath(source.path, filePath);
 
-      if (!parsed.slug) {
-        parsed.slug = slugFromPath;
-      } else if (parsed.slug !== slugFromPath) {
+      // 型ガード: parsedはRecord<string, unknown>型として扱う
+      const parsedObj = parsed as Record<string, unknown>;
+      if (!parsedObj.slug) {
+        parsedObj.slug = slugFromPath;
+      } else if (parsedObj.slug !== slugFromPath) {
         throw new Error(
-          `slug mismatch: expected "${slugFromPath}", got "${parsed.slug}" in ${filePath}`
+          `slug mismatch: expected "${slugFromPath}", got "${parsedObj.slug}" in ${filePath}`
         );
       }
+
+      parsed = parsedObj;
     }
 
-    return parsed;
+    return parsed as T;
   }
 
   /**
@@ -128,19 +133,17 @@ export class DataLoader {
   private getExtname(p: string): string {
     const i = p.lastIndexOf(".");
     if (i === -1) return "";
+
     return p.slice(i);
   }
 
   /**
-   * ファイルパスからslug（論理ID）を生成（Node.js非依存）
+   * ファイルパスからslug（論理ID）を生成
    * @param sourcePath - 設定で定義されたsourceのパス（glob含む）
    * @param filePath - 実際のファイルパス
-   * @returns slug文字列（例: "matricaria-chamomilla"）
+   * @returns slug文字列
    */
   private getSlugFromPath(sourcePath: string, filePath: string): string {
-    // sourcePath例: "tests/content-fixtures/herbs/*.md"
-    // filePath例: "tests/content-fixtures/herbs/matricaria-chamomilla.md"
-    // slug: "matricaria-chamomilla"
     const ext = this.getExtname(filePath);
     const baseDir = this.extractBaseDir(sourcePath);
     let rel = filePath.startsWith(baseDir)
@@ -148,6 +151,7 @@ export class DataLoader {
       : filePath;
     if (rel.startsWith("/")) rel = rel.slice(1);
     const slug = rel.replace(ext, "").replace(/\//g, "--");
+
     return slug;
   }
 
@@ -160,6 +164,7 @@ export class DataLoader {
     const parts = globPath.split("/");
     const index = parts.findIndex((part) => part.includes("*"));
     if (index === -1) return globPath;
+
     return parts.slice(0, index).join("/") + "/";
   }
 
@@ -171,6 +176,7 @@ export class DataLoader {
    */
   private resolveFilePath(sourceGlob: string, relativePath: string): string {
     const baseDir = this.extractBaseDir(sourceGlob);
+
     return baseDir + relativePath;
   }
 }

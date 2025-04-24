@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs/promises";
 import staticqlConfig from "./staticql.config";
 import { FileSystemProvider } from "../src/storage/FileSystemProvider";
+import { ReportsRecord, HerbsRecord } from "./types/staticql-types.js";
 
 const OUTPUT_DIR = "tests/output";
 
@@ -17,27 +18,31 @@ beforeAll(async () => {
 describe("HasOneThrough / HasManyThrough Relations", () => {
   it("should resolve hasOneThrough (reports.processThroughReportGroup)", async () => {
     const reports = await db
-      .from("reports")
+      .from<ReportsRecord>("reports")
       .join("processThroughReportGroup")
       .exec();
+    expect(reports).toBeTruthy();
 
     const report = reports.find((r: any) => r.slug === "reportGroup002--001");
     expect(report).toBeTruthy();
-    expect(typeof report.processThroughReportGroup === "object").toBe(true);
-    expect(report.processThroughReportGroup.slug).toBe("tincture");
+    expect(typeof report?.processThroughReportGroup === "object").toBe(true);
+    expect(report?.processThroughReportGroup!.slug).toBe("tincture");
   });
 });
 
 describe("Indexer", () => {
   it("should resolve hasMany relation with array foreignKey (herbs.reports)", async () => {
-    const herbs = await db.from("herbs").join("reports").exec();
-    const chamomile = herbs.find(
-      (h: any) => h.slug === "matricaria-chamomilla"
-    );
+    const herbs = await db
+      .from<HerbsRecord & { reports: ReportsRecord[] }>("herbs")
+      .join("reports")
+      .exec();
+    const chamomile = (
+      herbs as Array<HerbsRecord & { reports: ReportsRecord[] }>
+    ).find((h) => h.slug === "matricaria-chamomilla");
     expect(chamomile).toBeTruthy();
-    expect(Array.isArray(chamomile.reports)).toBe(true);
+    expect(Array.isArray(chamomile!.reports)).toBe(true);
     // Should contain all related reports (check at least one known slug)
-    const reportSlugs = chamomile.reports.map((r: any) => r.slug);
+    const reportSlugs = chamomile!.reports.map((r) => r.slug);
     expect(reportSlugs.length).toBeGreaterThan(0);
     expect(reportSlugs).toContain("reportGroup001--001");
   });
