@@ -45,6 +45,7 @@ export class DataLoader<T = unknown> {
 
   /**
    * 指定した sourceName, slug から1件のデータをロードし、型バリデーションする
+   * ファイル内に複数データ（配列）がある場合はslug一致要素を返す
    * @param sourceName - 設定で定義された source 名
    * @param slug - ファイル名等から生成される一意な識別子
    * @returns データオブジェクト
@@ -54,16 +55,30 @@ export class DataLoader<T = unknown> {
     const source = this.config.sources[sourceName];
     if (!source) throw new Error(`Unknown source: ${sourceName}`);
 
-    const ext = this.getExtname(source.path);
+    let filePath: string;
 
-    const relativePath = slug.replace(/--/g, "/") + ext;
-    const filePath = this.resolveFilePath(source.path, relativePath);
+    // glob（*）を含む場合は従来通りslug→ファイル名変換
+    if (source.path.includes("*")) {
+      const ext = this.getExtname(source.path);
+      const relativePath = slug.replace(/--/g, "/") + ext;
+      filePath = this.resolveFilePath(source.path, relativePath);
+    } else {
+      // それ以外はsource.pathをそのまま使う
+      filePath = source.path;
+    }
 
     try {
       const parsed = await this.parseFile(filePath, source, filePath);
-      source.schema.parse([parsed]);
-
-      return parsed;
+      // 配列の場合はslug一致要素を返す
+      if (Array.isArray(parsed)) {
+        const found = parsed.find((item) => item && item.slug === slug);
+        if (!found) throw new Error(`slug not found in file: ${filePath}`);
+        source.schema.parse([found]);
+        return found as T;
+      } else {
+        source.schema.parse([parsed]);
+        return parsed as T;
+      }
     } catch (err) {
       throw new Error(`Failed to loadBySlug: ${filePath} — ${err}`);
     }

@@ -1,6 +1,6 @@
 {
   "name": "@migiwa-ya/staticql",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "type": "module",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
