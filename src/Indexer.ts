@@ -343,20 +343,21 @@ export class Indexer<T extends SourceRecord = SourceRecord> {
           metaObj[field] = Array.from(new Set(values));
         } else if (relValue && typeof relValue === "object") {
           const arr = extractNestedProperty([relValue], relProp);
-          metaObj[field] = arr.length === 1 ? arr[0] : Array.from(new Set(arr));
-        } else {
-          // If the relation is missing, output an empty array for hasMany, or undefined for hasOne
-          const relConfig = sourceDef.relations && sourceDef.relations[relKey];
-
-          if (
-            relConfig &&
-            (relConfig.type === "hasMany" ||
-              relConfig.type === "hasManyThrough")
-          ) {
-            metaObj[field] = [];
+          // metaで指定されたプロパティが配列かどうかで判定
+          const prop0 = relProp[0];
+          const isArrayProp =
+            Array.isArray(
+              Array.isArray(relValue)
+                ? relValue[0]?.[prop0]
+                : relValue[prop0]
+            );
+          if (isArrayProp) {
+            metaObj[field] = Array.from(new Set(arr));
           } else {
-            metaObj[field] = undefined;
+            metaObj[field] = arr.length === 1 ? arr[0] : Array.from(new Set(arr));
           }
+        } else {
+          metaObj[field] = undefined;
         }
       } else if (sourceDef.relations && sourceDef.relations[field]) {
         // Top-level relation (no dot)
