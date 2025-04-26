@@ -13,6 +13,7 @@ const outputPath = "tests/types/";
 describe("generate-types", () => {
   beforeAll(async () => {
     // Run the type generation script before tests
+    console.log(path.resolve("cli/generate-types.ts"))
     await exec("tsx", [
       path.resolve("cli/generate-types.ts"),
       configPath,

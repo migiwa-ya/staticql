@@ -85,6 +85,25 @@ export class DataLoader<T = unknown> {
   }
 
   /**
+   * 指定した sourceName, slugs 配列から該当するデータをまとめて取得する
+   * @param sourceName - 設定で定義された source 名
+   * @param slugs - 取得したいslugの配列
+   * @returns slugに一致するデータ配列（見つかったもののみ返す）
+   */
+  async loadBySlugs(sourceName: string, slugs: string[]): Promise<T[]> {
+    // slugごとにloadBySlugを並列実行し、見つかったものだけ返す
+    const results = await Promise.allSettled(
+      slugs.map((slug) => this.loadBySlug(sourceName, slug))
+    );
+
+    return results
+      .filter(
+        (r): r is PromiseFulfilledResult<Awaited<T>> => r.status === "fulfilled"
+      )
+      .map((r) => r.value);
+  }
+
+  /**
    * 1ファイルをパースし、型・slug整合性を検証してデータオブジェクト化する
    * @param filePath - ファイルのパス
    * @param source - SourceConfig オブジェクト

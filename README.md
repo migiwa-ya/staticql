@@ -6,7 +6,7 @@ staticql は、Markdown / YAML / JSON ファイルを型安全に読み込み、
 
 - Zod によるスキーマバリデーション
 - SQL ライクなクエリ（where / join）
-- CLI でインデックファイル、API用メタファイルを出力可能
+- CLI でインデックファイル、API 用メタファイルを出力可能
 
 ## インストール
 
@@ -34,6 +34,10 @@ import { defineContentDB } from "@migiwa-ya/staticql";
 import { z } from "zod";
 
 export default defineContentDB({
+  storage: {
+    type: "filesystem",
+    output: "output",
+  },
   sources: {
     herbs: {
       path: "tests/content-fixtures/herbs/*.md",
@@ -50,6 +54,7 @@ export default defineContentDB({
           to: "herbStates",
           localKey: "herbStateSlug",
           foreignKey: "slug",
+          type: "hasOne",
         },
       },
       index: ["name", "herbState.name", "tags"],
@@ -134,8 +139,8 @@ output/
         └── ...
 ```
 
-- それぞれのファイル（例: `001.json`）には、そのキー値に該当するslug配列が格納されます。
-- デフォルト（splitIndexByKey未指定またはfalse）は従来通り `reportGroups.index-processSlug.json` 1ファイルに全件が格納されます。
+- それぞれのファイル（例: `001.json`）には、そのキー値に該当する slug 配列が格納されます。
+- デフォルト（splitIndexByKey 未指定または false）は従来通り `reportGroups.index-processSlug.json` 1 ファイルに全件が格納されます。
 
 #### どちらを選ぶべきか
 
@@ -174,11 +179,11 @@ sources: {
 
 - hasMany リレーションや配列フィールドはフラットな配列になります。
 - ドット記法でリレーション先の属性も抽出できます。
-- throughリレーションや多段リレーションもサポートしています。
+- through リレーションや多段リレーションもサポートしています。
 
 ## Fast Querying with Index Files
 
-QueryBuilder はデフォルトで `output/` ディレクトリの index ファイルを利用し、比較的高速に検索します。  
+QueryBuilder は `defineContentDB` の `storage.output` ディレクトリの index ファイルを利用し、比較的高速に検索します。  
 `options({ indexDir: "..." })` でインデックスディレクトリを指定できます。
 
 ### Speed Comparison Example
@@ -258,12 +263,12 @@ relations: {
 - QueryBuilder で `.join("processThroughReportGroup")` で利用可能です。
 - meta: ["processThroughReportGroup.name"] のようにドット記法で中間リレーション先の属性も抽出できます。
 
-## Cloudflare R2 / S3互換ストレージ対応
+## Cloudflare R2 / S3 互換ストレージ対応
 
-staticqlはローカルファイルだけでなく、Cloudflare R2やS3互換ストレージもデータソース・出力先として利用できます。  
-CLI・QueryBuilder・Indexer・型生成など全てのI/OがStorageProviderで抽象化されており、設定ファイルでstorage.typeを切り替えるだけでローカル/クラウド両対応となります。
+staticql はローカルファイルだけでなく、Cloudflare R2 や S3 互換ストレージもデータソース・出力先として利用できます。  
+CLI・QueryBuilder・Indexer・型生成など全ての I/O が StorageProvider で抽象化されており、設定ファイルで storage.type を切り替えるだけでローカル/クラウド両対応となります。
 
-### 設定例（R2/S3バケット利用）
+### 設定例（R2/S3 バケット利用）
 
 ```ts
 import { defineContentDB } from "@migiwa-ya/staticql";
@@ -280,14 +285,14 @@ export default defineContentDB({
   },
   sources: {
     // ...従来通り
-  }
+  },
 });
 ```
 
-- storage.type: "s3" でR2/S3バケットを利用
-- Node.js/Cloudflare Workers/Fetch API両対応
-- S3互換APIへの署名付きリクエストには [aws4fetch](https://github.com/mhart/aws4fetch) を利用
-- CLIやQueryBuilderも自動的にProviderを切り替え
+- storage.type: "s3" で R2/S3 バケットを利用
+- Node.js/Cloudflare Workers/Fetch API 両対応
+- S3 互換 API への署名付きリクエストには [aws4fetch](https://github.com/mhart/aws4fetch) を利用
+- CLI や QueryBuilder も自動的に Provider を切り替え
 - 出力先パスは論理パスで指定（バケット内のディレクトリ構成をそのまま反映）
 
 ## 実行例（Node.js）
