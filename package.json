@@ -1,6 +1,6 @@
 {
   "name": "@migiwa-ya/staticql",
-  "version": "0.10.4",
+  "version": "0.11.0",
   "type": "module",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
@@ -59,7 +59,6 @@
   },
   "dependencies": {
     "aws4fetch": "^1.0.20",
-    "globby": "^14.1.0",
     "gray-matter": "^4.0.3",
     "js-yaml": "^4.1.0",
     "zod": "^3.24.2"
