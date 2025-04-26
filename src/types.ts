@@ -12,22 +12,24 @@ export type SourceConfig = {
   splitIndexByKey?: boolean;
 };
 
-export type RelationConfig =
-  | {
-      to: string;
-      localKey: string;
-      foreignKey: string;
-      type?: "hasOne" | "hasMany";
-    }
-  | {
-      to: string;
-      through: string;
-      sourceLocalKey: string;
-      throughForeignKey: string;
-      throughLocalKey: string;
-      targetForeignKey: string;
-      type: "hasOneThrough" | "hasManyThrough";
-    };
+export type DirectRelation = {
+  to: string;
+  localKey: string;
+  foreignKey: string;
+  type?: "hasOne" | "hasMany";
+};
+
+export type ThroughRelation = {
+  to: string;
+  through: string;
+  sourceLocalKey: string;
+  throughForeignKey: string;
+  throughLocalKey: string;
+  targetForeignKey: string;
+  type: "hasOneThrough" | "hasManyThrough";
+};
+
+export type RelationConfig = DirectRelation | ThroughRelation;
 
 import type { S3ProviderOptions } from "./storage/S3Provider";
 
