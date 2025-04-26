@@ -16,7 +16,7 @@ export type DirectRelation = {
   to: string;
   localKey: string;
   foreignKey: string;
-  type?: "hasOne" | "hasMany";
+  type: "hasOne" | "hasMany" | "belongsTo" | "belongsToMany";
 };
 
 export type ThroughRelation = {
@@ -34,12 +34,12 @@ export type RelationConfig = DirectRelation | ThroughRelation;
 import type { S3ProviderOptions } from "./storage/S3Provider";
 
 export type StorageConfig =
-  | { type: "filesystem"; baseDir?: string }
-  | ({ type: "s3" } & S3ProviderOptions);
+  | { type: "filesystem"; baseDir?: string; output: string }
+  | ({ type: "s3"; output: string } & S3ProviderOptions);
 
 export type ContentDBConfig = {
+  storage: StorageConfig;
   sources: Record<string, SourceConfig>;
-  storage?: StorageConfig;
 };
 
 export type SourceRecord = {

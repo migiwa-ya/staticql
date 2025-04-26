@@ -73,7 +73,7 @@ function extractZodFields(schema: any): Record<string, any> {
           } else if (typeName === "ZodLiteral") {
             fields[key] = JSON.stringify(unwrapped._def.value);
           } else if (typeName === "ZodDate") {
-            fields[key] = "string"
+            fields[key] = "string";
           } else {
             fields[key] = "any";
           }
@@ -128,7 +128,9 @@ async function run() {
     inputConfig || "staticql.config.ts"
   );
   const outputDir = inputOut || "types";
-  const outPath = (outputDir.endsWith("/") ? outputDir : outputDir + "/") + "staticql-types.d.ts";
+  const outPath =
+    (outputDir.endsWith("/") ? outputDir : outputDir + "/") +
+    "staticql-types.d.ts";
 
   let db;
 
@@ -136,7 +138,7 @@ async function run() {
     const configModule = await import(pathToFileURL(configPath).href);
     db = configModule.default;
 
-    if (!db || typeof db.index !== "function") {
+    if (!db) {
       throw new Error(
         "staticql.config.ts が正しく defineContentDB() を export していません。"
       );
@@ -192,8 +194,14 @@ async function run() {
           const targetType =
             targetSource[0].toUpperCase() + targetSource.slice(1) + "Record";
           let valueType = targetType;
-          if (relType === "hasMany" || relType === "hasManyThrough") {
+          if (
+            relType === "hasMany" ||
+            relType === "hasManyThrough" ||
+            relType === "belongsToMany"
+          ) {
             valueType = `${targetType}[]`;
+          } else if (relType === "belongsTo") {
+            valueType = `${targetType} | null`;
           }
           body += `\n  ${relKey}?: ${valueType};`;
         }
@@ -228,8 +236,14 @@ async function run() {
         const targetType =
           targetSource[0].toUpperCase() + targetSource.slice(1) + "Record";
         let valueType = targetType;
-        if (relType === "hasMany" || relType === "hasManyThrough") {
+        if (
+          relType === "hasMany" ||
+          relType === "hasManyThrough" ||
+          relType === "belongsToMany"
+        ) {
           valueType = `${targetType}[]`;
+        } else if (relType === "belongsTo") {
+          valueType = `${targetType} | null`;
         }
         recordFields[relKey] = valueType;
       }
@@ -261,8 +275,14 @@ async function run() {
           relType = (relDef as any).type;
         }
         let valueType = "string";
-        if (relType === "hasMany" || relType === "hasManyThrough") {
+        if (
+          relType === "hasMany" ||
+          relType === "hasManyThrough" ||
+          relType === "belongsToMany"
+        ) {
           valueType = "string[]";
+        } else if (relType === "belongsTo") {
+          valueType = "string | null";
         }
         relationTypeStrings.push(
           `export type ${

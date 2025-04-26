@@ -2,6 +2,10 @@ import { defineContentDB } from "../src/index.js";
 import { z } from "zod";
 
 export default defineContentDB({
+  storage: {
+    type: "filesystem",
+    output: "tests/output",
+  },
   sources: {
     herbs: {
       path: "tests/content-fixtures/herbs/*.md",
@@ -24,7 +28,7 @@ export default defineContentDB({
           to: "reports",
           localKey: "slug",
           foreignKey: "combinedHerbs.slug",
-          type: "hasMany",
+          type: "belongsToMany",
         },
       },
       index: ["name", "herbState.name", "reports.reportGroupSlug", "tags"],

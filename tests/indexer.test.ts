@@ -11,7 +11,6 @@ const db = staticqlConfig;
 
 beforeAll(async () => {
   await fs.rm(OUTPUT_DIR, { recursive: true, force: true });
-  await db.index();
   await db.saveIndexesTo(OUTPUT_DIR);
 });
 
@@ -33,15 +32,16 @@ describe("HasOneThrough / HasManyThrough Relations", () => {
 describe("Indexer", () => {
   it("should resolve hasMany relation with array foreignKey (herbs.reports)", async () => {
     const herbs = await db
-      .from<HerbsRecord & { reports: ReportsRecord[] }>("herbs")
+      .from<HerbsRecord>("herbs")
       .join("reports")
+      .where("slug", "eq", "matricaria-chamomilla")
+      .options({ indexDir: OUTPUT_DIR })
       .exec();
-    const chamomile = (
-      herbs as Array<HerbsRecord & { reports: ReportsRecord[] }>
-    ).find((h) => h.slug === "matricaria-chamomilla");
+
+    const chamomile = herbs.find((h) => h.slug === "matricaria-chamomilla");
     expect(chamomile).toBeTruthy();
     expect(Array.isArray(chamomile!.reports)).toBe(true);
-    // Should contain all related reports (check at least one known slug)
+    if (!chamomile?.reports) return;
     const reportSlugs = chamomile!.reports.map((r) => r.slug);
     expect(reportSlugs.length).toBeGreaterThan(0);
     expect(reportSlugs).toContain("reportGroup001--001");

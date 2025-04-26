@@ -13,15 +13,13 @@ type Filter =
   | { field: string; op: "eq" | "contains"; value: string }
   | { field: string; op: "in"; value: string[] };
 
-type indexMode = "only" | "none";
-
 export class QueryBuilder<T> {
   private sourceName: string;
   private config: ContentDBConfig;
   private loader: DataLoader<T>;
   private joins: string[] = [];
   private filters: Filter[] = [];
-  private optionsData: { indexMode?: indexMode; indexDir?: string } = {};
+  private optionsData: { indexDir?: string } = {};
 
   constructor(
     sourceName: string,
@@ -66,13 +64,11 @@ export class QueryBuilder<T> {
   }
 
   /**
-   * クエリ実行時のオプション（インデックスモードや出力ディレクトリ）を指定する
+   * クエリ実行時のオプションを指定する
    * @param opts - オプションオブジェクト
    * @returns this（メソッドチェーン可）
    */
-  options(opts: { indexMode: "only"; indexDir: string }): this;
-  options(opts: { indexMode: "none" }): this;
-  options(opts: { indexMode?: indexMode; indexDir?: string }): this {
+  options(opts: { indexDir?: string }): this {
     this.optionsData = {
       ...this.optionsData,
       ...opts,
@@ -84,25 +80,18 @@ export class QueryBuilder<T> {
   /**
    * インデックスフィルタとフォールバックフィルタを抽出する
    * @param sourceDef
-   * @param indexMode
    * @returns { indexedFilters: Filter[], fallbackFilters: Filter[] }
    */
-  private extractIndexFilters(
-    sourceDef: SourceConfig,
-    indexMode: indexMode
-  ): { indexedFilters: Filter[]; fallbackFilters: Filter[] } {
-    const indexableFields = new Set(sourceDef.index ?? []);
+  private extractIndexFilters(sourceDef: SourceConfig): {
+    indexedFilters: Filter[];
+    fallbackFilters: Filter[];
+  } {
+    const indexableFields = new Set(["slug", ...(sourceDef.index ?? [])]);
     let indexedFilters: Filter[] = [];
     let fallbackFilters: Filter[] = [];
 
-    if (indexMode === "none") {
-      fallbackFilters = this.filters;
-    } else {
-      indexedFilters = this.filters.filter((f) => indexableFields.has(f.field));
-      fallbackFilters = this.filters.filter(
-        (f) => !indexableFields.has(f.field)
-      );
-    }
+    indexedFilters = this.filters.filter((f) => indexableFields.has(f.field));
+    fallbackFilters = this.filters.filter((f) => !indexableFields.has(f.field));
 
     return { indexedFilters, fallbackFilters };
   }
@@ -114,13 +103,10 @@ export class QueryBuilder<T> {
    */
   async exec(): Promise<T[]> {
     const sourceDef = this.config.sources[this.sourceName];
-    const indexMode: indexMode = this.optionsData?.indexMode ?? "none";
 
     // インデックスフィルタとフォールバックフィルタを抽出
-    const { indexedFilters, fallbackFilters } = this.extractIndexFilters(
-      sourceDef,
-      indexMode
-    );
+    const { indexedFilters, fallbackFilters } =
+      this.extractIndexFilters(sourceDef);
 
     const requiresJoin =
       fallbackFilters.some((f) => f.field.includes(".")) ||
@@ -130,15 +116,10 @@ export class QueryBuilder<T> {
     let matchedSlugs: string[] | null = null;
 
     matchedSlugs = await this.getMatchedSlugsFromIndexFilters(
+      this.sourceName,
       indexedFilters,
-      sourceDef,
-      indexMode
+      sourceDef
     );
-
-    // インデックスモードが "only" かつ一致するslugがなければ空配列を返す
-    if (indexMode === "only" && (!matchedSlugs || matchedSlugs.length === 0)) {
-      return [];
-    }
 
     if (matchedSlugs && matchedSlugs.length > 0) {
       result = await Promise.all(
@@ -167,21 +148,35 @@ export class QueryBuilder<T> {
    * @param sourceDef
    * @returns Promise<T[]>
    */
-  private async applyJoins(result: T[], sourceDef: any): Promise<T[]> {
+  private async applyJoins(result: T[], sourceDef: SourceConfig): Promise<T[]> {
     for (const key of this.joins) {
       const rel = sourceDef.relations?.[key];
       if (!rel) throw new Error(`Unknown relation: ${key}`);
 
       // Type guard for through relation
       const isThrough =
-        typeof rel === "object" &&
-        "through" in rel &&
-        (rel.type === "hasOneThrough" || rel.type === "hasManyThrough");
+        rel.type === "hasOneThrough" || rel.type === "hasManyThrough";
 
       if (isThrough) {
         // Through relation (hasOneThrough, hasManyThrough)
-        const throughData = await this.loader.load(rel.through);
-        const targetData = await this.loader.load(rel.to);
+
+        const sourceSlugs = result.flatMap((row) =>
+          getAllFieldValues(row, rel.sourceLocalKey)
+        );
+        const uniqueSourceSlugs = Array.from(new Set(sourceSlugs));
+        const throughData = await this.loader.loadBySlugs(
+          rel.through,
+          uniqueSourceSlugs
+        );
+
+        const targetSlugs = throughData.flatMap((t) =>
+          getAllFieldValues(t, rel.throughLocalKey)
+        );
+        const uniqueTargetSlugs = Array.from(new Set(targetSlugs));
+        const targetData = await this.loader.loadBySlugs(
+          rel.to,
+          uniqueTargetSlugs
+        );
 
         result = result.map((row) => {
           const relValue = resolveThroughRelation(
@@ -199,23 +194,71 @@ export class QueryBuilder<T> {
           }
         });
       } else {
-        // Type guard for direct relation
+        // Type guard for direct relation (hasOne, hasMany, belongsTo)
         const directRel = rel as Extract<
           typeof rel,
-          { localKey: string; foreignKey: string }
+          { localKey: string; foreignKey: string; type?: string }
         >;
-        const foreignData = await this.loader.load(directRel.to);
+
+        let foreignData: any[] = [];
+        if (
+          directRel.type === "belongsTo" ||
+          directRel.type === "belongsToMany"
+        ) {
+          // belongsTo/belongsToMany: getMatchedSlugsFromIndexFiltersでslugリストを取得
+          const allLocalVals = result.flatMap((row) =>
+            getAllFieldValues(row, directRel.localKey)
+          );
+          const slugs = await this.getMatchedSlugsFromIndexFilters(
+            directRel.to,
+            [{ field: directRel.foreignKey, op: "in", value: allLocalVals }],
+            // directRel.localKey
+            this.config.sources[directRel.to]
+          );
+          const uniqueSlugs = slugs ? Array.from(new Set(slugs)) : [];
+          foreignData = await this.loader.loadBySlugs(
+            directRel.to,
+            uniqueSlugs
+          );
+        } else {
+          // hasOne/hasMany: localKey値をslugとしてloadBySlugs
+          const allSlugs = result.flatMap((row) =>
+            getAllFieldValues(row, directRel.localKey)
+          );
+          const uniqueSlugs = Array.from(new Set(allSlugs));
+          foreignData = await this.loader.loadBySlugs(
+            directRel.to,
+            uniqueSlugs
+          );
+        }
 
         result = result.map((row) => {
-          const relValue = resolveDirectRelation(row, directRel, foreignData);
-          const relType = (directRel as any).type;
-
-          if (relType === "hasOne") {
-            return { ...row, [key]: relValue ?? null };
-          } else if (relType === "hasMany") {
-            return { ...row, [key]: relValue ?? [] };
+          if (
+            directRel.type === "belongsTo" ||
+            directRel.type === "belongsToMany"
+          ) {
+            // belongsTo/belongsToMany: localKey値がforeignKey値に含まれるものを逆参照
+            const localVals = getAllFieldValues(row, directRel.localKey);
+            const related = foreignData.filter((targetRow) => {
+              const foreignVals = getAllFieldValues(
+                targetRow,
+                directRel.foreignKey
+              );
+              return localVals.some((val) => foreignVals.includes(val));
+            });
+            return { ...row, [key]: related };
           } else {
-            return { ...row, [key]: relValue ?? [] };
+            // hasOne/hasMany
+            const relValue = resolveDirectRelation(row, directRel, foreignData);
+            const relType = directRel.type;
+
+            if (relType === "hasOne") {
+              return { ...row, [key]: relValue ?? null };
+            } else if (relType === "hasMany") {
+              return { ...row, [key]: relValue ?? [] };
+            } else {
+              return { ...row, [key]: relValue ?? [] };
+            }
           }
         });
       }
@@ -259,21 +302,14 @@ export class QueryBuilder<T> {
    * インデックスフィルタから一致するslugリストを抽出する
    * @param indexedFilters
    * @param sourceDef
-   * @param indexMode
    * @returns string[] | null
    */
   private async getMatchedSlugsFromIndexFilters(
+    sourceName: string,
     indexedFilters: Filter[],
-    sourceDef: any,
-    indexMode: indexMode
+    sourceDef: SourceConfig
   ): Promise<string[] | null> {
-    if (
-      !(indexedFilters.length > 0 && indexMode !== "none" && sourceDef.index)
-    ) {
-      return null;
-    }
-
-    const indexDir = this.optionsData.indexDir || "output";
+    const indexDir = this.optionsData.indexDir || this.config.storage.output;
 
     let indexSlugs: string[] | null = null;
 
@@ -285,7 +321,7 @@ export class QueryBuilder<T> {
       if (sourceDef.splitIndexByKey) {
         // 分割インデックスファイル方式
 
-        const dirPath = `${indexDir}/${this.sourceName}/index-${field}`;
+        const dirPath = `${indexDir}/${sourceName}/index-${field}`;
 
         if (op === "eq") {
           const keyValue = String(value);
@@ -330,7 +366,7 @@ export class QueryBuilder<T> {
 
           try {
             files = await provider.listFiles(
-              `${indexDir}/${this.sourceName}/index-${field}/`
+              `${indexDir}/${sourceName}/index-${field}/`
             );
           } catch {
             files = [];
@@ -360,7 +396,7 @@ export class QueryBuilder<T> {
       } else {
         // 単一インデックスファイル方式
         let indexMap: Record<string, string[]> | null = null;
-        const filePath = `${indexDir}/${this.sourceName}.index-${field}.json`;
+        const filePath = `${indexDir}/${sourceName}.index-${field}.json`;
 
         try {
           let raw = await provider.readFile(filePath);
@@ -373,7 +409,7 @@ export class QueryBuilder<T> {
           }
 
           indexMap = JSON.parse(fileContent);
-        } catch {
+        } catch (e) {
           indexMap = null;
         }
 

@@ -6,10 +6,14 @@ async function run() {
   const [inputConfig, inputOut] = process.argv.slice(2);
   // Node.js/Workers両対応: 絶対パスならそのまま、相対パスならCWDから連結
   let configPath = inputConfig || "staticql.config.ts";
-  if (!configPath.startsWith("/") && typeof process !== "undefined" && process.cwd) {
+  if (
+    !configPath.startsWith("/") &&
+    typeof process !== "undefined" &&
+    process.cwd
+  ) {
     configPath = process.cwd() + "/" + configPath;
   }
-  const outputDir = inputOut || "public/index";
+  const outputDir = inputOut;
 
   let db;
 
@@ -17,7 +21,7 @@ async function run() {
     const configModule = await import(pathToFileURL(configPath).href);
     db = configModule.default;
 
-    if (!db || typeof db.index !== "function") {
+    if (!db) {
       throw new Error(
         "staticql.config.ts が正しく defineContentDB() を export していません。"
       );

@@ -9,8 +9,6 @@ import {
 import type { StorageProvider } from "./storage/StorageProvider";
 import {
   resolveField,
-  unwrapSingleArray,
-  findEntriesByPartialKey,
   extractNestedProperty,
   ensureDir,
   resolveDirectRelation,
@@ -152,10 +150,32 @@ export class Indexer<T extends SourceRecord = SourceRecord> {
       return data;
     });
 
+    // インデックス対象フィールドを決定
+    const explicitIndex: string[] = sourceDef.index ?? [];
+
+    // relationsごとに適切なインデックスキーを自動追加
+    const relationIndex: string[] = [];
+    if (sourceDef.relations) {
+      for (const [relKey, rel] of Object.entries(sourceDef.relations)) {
+        if (rel.type === "belongsTo" || rel.type === "belongsToMany") {
+          // belongsTo: foreignKey（例: combinedHerbs.slug）
+          relationIndex.push(rel.foreignKey);
+        } else {
+          // hasOne/hasMany/through: key.slug
+          relationIndex.push(`${relKey}.slug`);
+        }
+      }
+    }
+
+    // 明示指定とrelations由来を結合し重複除去
+    const indexFields = Array.from(
+      new Set([...explicitIndex, ...relationIndex])
+    );
+
     // インデックス構築
     return attached.map((row) => {
       const values: Record<string, string> = {};
-      for (const fld of sourceDef.index!) {
+      for (const fld of indexFields) {
         const v = resolveField(row, fld);
         if (v != null && String(v) !== "") values[fld] = String(v);
       }
