@@ -29,3 +29,5 @@ export async function defineContentDB(
 
   return new ContentDB(config, provider);
 }
+
+export type { ContentDBConfig } from "./types";
