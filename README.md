@@ -263,50 +263,45 @@ relations: {
 - QueryBuilder で `.join("processThroughReportGroup")` で利用可能です。
 - meta: ["processThroughReportGroup.name"] のようにドット記法で中間リレーション先の属性も抽出できます。
 
-## Cloudflare R2 / S3 互換ストレージ対応
+## Cloudflare R2 ストレージ対応
 
-staticql はローカルファイルだけでなく、Cloudflare R2 や S3 互換ストレージもデータソース・出力先として利用できます。  
+staticql はローカルファイルだけでなく、Cloudflare R2 ストレージもデータソース・出力先として利用できます。  
 CLI・QueryBuilder・Indexer・型生成など全ての I/O が StorageProvider で抽象化されており、設定ファイルで storage.type を切り替えるだけでローカル/クラウド両対応となります。
+**なお、現状は Cloudflare Workers での利用を想定しており、バインドされた R2Bucket を渡す必要があるため定義ファイルでは defineContentDB による初期化は行わず、実際に利用するコード内で R2Bucket 参照を渡してから初期化します。**
 
-### 設定例（R2/S3 バケット利用）
+### 設定例（R2 バケット利用）
 
 ```ts
-import { defineContentDB } from "@migiwa-ya/staticql";
+// staticql.config.ts
 import { z } from "zod";
+import type { ContentDBConfig } from "@migiwa-ya/staticql";
 
-export default defineContentDB({
-  storage: {
-    type: "s3",
-    endpoint: "https://<accountid>.r2.cloudflarestorage.com",
-    bucket: "<bucket-name>",
-    accessKeyId: "<R2_ACCESS_KEY_ID>",
-    secretAccessKey: "<R2_SECRET_ACCESS_KEY>",
-    // region: "auto" // R2はregion不要
-  },
+export default {
   sources: {
     // ...従来通り
   },
-});
+} satisfies Omit<ContentDBConfig, "storage">;
 ```
 
-- storage.type: "s3" で R2/S3 バケットを利用
-- Node.js/Cloudflare Workers/Fetch API 両対応
-- S3 互換 API への署名付きリクエストには [aws4fetch](https://github.com/mhart/aws4fetch) を利用
-- CLI や QueryBuilder も自動的に Provider を切り替え
-- 出力先パスは論理パスで指定（バケット内のディレクトリ構成をそのまま反映）
-
-## 実行例（Node.js）
-
 ```ts
-import db from "./staticql.config.ts";
+import config from "../staticql.config";
+import { defineContentDB } from "@migiwa-ya/staticql";
 
-const result = await db
-  .from("herbs")
-  .join("herbState")
-  .where("name", "contains", "ミント")
-  .exec();
+export default {
+  async fetch(request, env: any, ctx): Promise<Response> {
+    const db = await defineContentDB({
+      ...config,
+      storage: {
+        type: "r2",
+        bucket: env.MY_BUCKET,
+      },
+    });
 
-console.log(result);
+    const herbs = await db.from("herbs").exec();
+
+    return new Response(herbs[0].name);
+  },
+} satisfies ExportedHandler<Env>;
 ```
 
 ## ライセンス

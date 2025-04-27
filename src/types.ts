@@ -31,11 +31,11 @@ export type ThroughRelation = {
 
 export type RelationConfig = DirectRelation | ThroughRelation;
 
-import type { S3ProviderOptions } from "./storage/S3Provider";
+import type { R2Bucket } from "./storage/R2Provider";
 
 export type StorageConfig =
   | { type: "filesystem"; baseDir?: string; output: string }
-  | ({ type: "s3"; output: string } & S3ProviderOptions);
+  | ({ type: "r2"; output: string } & { bucket: R2Bucket });
 
 export type ContentDBConfig = {
   storage: StorageConfig;

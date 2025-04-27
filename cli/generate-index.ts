@@ -19,7 +19,7 @@ async function run() {
 
   try {
     const configModule = await import(pathToFileURL(configPath).href);
-    db = configModule.default;
+    db = await configModule.default;
 
     if (!db) {
       throw new Error(
@@ -34,7 +34,7 @@ async function run() {
 
   try {
     console.log("index.json を生成中...");
-    await db.saveIndexesTo(outputDir);
+    await db.saveIndexes(outputDir);
     console.log("index.json を生成しました");
   } catch (err) {
     console.error("インデックス生成中にエラーが発生しました");

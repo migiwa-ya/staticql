@@ -7,11 +7,11 @@ import { ReportsRecord, HerbsRecord } from "./types/staticql-types.js";
 
 const OUTPUT_DIR = "tests/output";
 
-const db = staticqlConfig;
+const db = await staticqlConfig;
 
 beforeAll(async () => {
   await fs.rm(OUTPUT_DIR, { recursive: true, force: true });
-  await db.saveIndexesTo(OUTPUT_DIR);
+  await db.saveIndexes(OUTPUT_DIR);
 });
 
 describe("HasOneThrough / HasManyThrough Relations", () => {

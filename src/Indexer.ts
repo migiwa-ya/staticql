@@ -176,9 +176,9 @@ export class Indexer<T extends SourceRecord = SourceRecord> {
           "through" in rel &&
           (rel.type === "hasOneThrough" || rel.type === "hasManyThrough")
         ) {
-          if (rel.through === sourceName) {
+          if (rel.through === sourceName && rel.throughForeignKey !== "slug") {
             relationIndex.push(rel.throughForeignKey);
-          } else if (rel.to === sourceName) {
+          } else if (rel.to === sourceName && rel.targetForeignKey !== "slug") {
             relationIndex.push(rel.targetForeignKey);
           }
         }

@@ -136,7 +136,7 @@ async function run() {
 
   try {
     const configModule = await import(pathToFileURL(configPath).href);
-    db = configModule.default;
+    db = await configModule.default;
 
     if (!db) {
       throw new Error(

@@ -2,12 +2,12 @@ import { describe, it, expect, beforeAll } from "vitest";
 import staticqlConfig from "./staticql.config";
 import { HerbsRecord, ReportsRecord } from "./types/staticql-types";
 
-const db = staticqlConfig;
+const db = await staticqlConfig;
 
 const OUTPUT_DIR = "tests/output";
 
 beforeAll(async () => {
-  await db.saveIndexesTo(OUTPUT_DIR);
+  await db.saveIndexes(OUTPUT_DIR);
 });
 
 describe("QueryBuilder with index optimization", () => {
