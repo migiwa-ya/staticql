@@ -32,23 +32,21 @@ export class Indexer<T extends SourceRecord = SourceRecord> {
   }
 
   /**
-   * 全sourceについてインデックス用レコード配列を生成し、キャッシュする
-   * @returns sourceNameごとのインデックスレコード配列
+   * 全sourceについてインデックス用レコード配列を生成 AsyncGenerator で返す
+   * @returns AsyncGenerator<{ sourceName, records, indexFields }>
    */
-  async buildAll(): Promise<Record<string, any[]>> {
-    if (this.cache) return this.cache;
-
-    const result: Record<string, any[]> = {};
-
+  async *buildAll(): AsyncGenerator<{
+    sourceName: string;
+    records: any[];
+    indexFields: string[];
+  }> {
     for (const [sourceName, sourceDef] of Object.entries(this.config.sources)) {
-      if (!sourceDef.index) continue;
-
-      result[sourceName] = await this.buildSourceIndex(sourceName, sourceDef);
+      const { records, indexFields } = await this.buildSourceIndex(
+        sourceName,
+        sourceDef
+      );
+      yield { sourceName, records, indexFields };
     }
-
-    this.cache = result;
-
-    return result;
   }
 
   /**
@@ -60,7 +58,7 @@ export class Indexer<T extends SourceRecord = SourceRecord> {
   private async buildSourceIndex(
     sourceName: string,
     sourceDef: SourceConfig
-  ): Promise<any[]> {
+  ): Promise<{ records: any[]; indexFields: string[] }> {
     // 対象ソースとリレーションソースをロード
     const loadKeys = new Set<string>([sourceName]);
     for (const rel of Object.values(sourceDef.relations ?? {})) {
@@ -167,13 +165,33 @@ export class Indexer<T extends SourceRecord = SourceRecord> {
       }
     }
 
+    // throughリレーション対応: 他sourceからthrough先として参照されている場合、throughForeignKey, targetForeignKeyを追加
+    for (const [otherSourceName, otherSourceDef] of Object.entries(
+      this.config.sources
+    )) {
+      if (!otherSourceDef.relations) continue;
+      for (const rel of Object.values(otherSourceDef.relations)) {
+        if (
+          typeof rel === "object" &&
+          "through" in rel &&
+          (rel.type === "hasOneThrough" || rel.type === "hasManyThrough")
+        ) {
+          if (rel.through === sourceName) {
+            relationIndex.push(rel.throughForeignKey);
+          } else if (rel.to === sourceName) {
+            relationIndex.push(rel.targetForeignKey);
+          }
+        }
+      }
+    }
+
     // 明示指定とrelations由来を結合し重複除去
     const indexFields = Array.from(
       new Set([...explicitIndex, ...relationIndex])
     );
 
     // インデックス構築
-    return attached.map((row) => {
+    const records = attached.map((row) => {
       const values: Record<string, string> = {};
       for (const fld of indexFields) {
         const v = resolveField(row, fld);
@@ -181,6 +199,7 @@ export class Indexer<T extends SourceRecord = SourceRecord> {
       }
       return { slug: row.slug, values };
     });
+    return { records, indexFields };
   }
 
   /**
@@ -220,76 +239,66 @@ export class Indexer<T extends SourceRecord = SourceRecord> {
    * @throws ストレージ書き込み失敗時に例外
    */
   async saveTo(outputDir: string): Promise<void> {
-    const all = await this.buildAll();
-
     // Provider経由でファイル出力
     const provider: StorageProvider = (this.loader as any).provider;
 
-    for (const [sourceName, records] of Object.entries(all)) {
+    for await (const { sourceName, records, indexFields } of this.buildAll()) {
       const sourceDef = this.config.sources[sourceName];
 
-      // Write index files per field
-      if (sourceDef.index) {
-        for (const field of sourceDef.index) {
-          if (sourceDef.splitIndexByKey) {
-            // 分割方式: output/{source_name}/index-{field}/{key_value}.json
-            const dirPath = `${outputDir.replace(
-              /\/$/,
-              ""
-            )}/${sourceName}/index-${field}`;
+      // Write index files per field (indexFields includes auto-added fields)
+      for (const field of indexFields) {
+        if (sourceDef.splitIndexByKey) {
+          // 分割方式: output/{source_name}/index-{field}/{key_value}.json
+          const dirPath = `${outputDir.replace(
+            /\/$/,
+            ""
+          )}/${sourceName}/index-${field}`;
 
-            // ローカルファイルシステム時のみensureDir
-            if (
-              (provider as any).type === "filesystem" ||
-              (provider as any).baseDir !== undefined
-            ) {
-              await ensureDir(dirPath);
-            }
-
-            // key_valueごとにファイルを分割出力
-            const keyMap: Record<string, string[]> = {};
-            for (const rec of records) {
-              const value = rec.values[field];
-              if (value == null) continue;
-              for (const v of value.split(" ")) {
-                if (!v) continue;
-                if (!keyMap[v]) keyMap[v] = [];
-                keyMap[v].push(rec.slug);
-              }
-            }
-
-            for (const [keyValue, slugs] of Object.entries(keyMap)) {
-              const filePath = `${dirPath}/${keyValue}.json`;
-              await provider.writeFile(
-                filePath,
-                JSON.stringify(slugs, null, 2)
-              );
-            }
-          } else {
-            // 従来方式: {source_name}.index-{field}.json
-            const indexMap: Record<string, string[]> = {};
-
-            for (const rec of records) {
-              const value = rec.values[field];
-              if (value == null) continue;
-              // Support multi-value fields (space-separated)
-              for (const v of value.split(" ")) {
-                if (!v) continue;
-                if (!indexMap[v]) indexMap[v] = [];
-                indexMap[v].push(rec.slug);
-              }
-            }
-
-            const filePath = `${outputDir.replace(
-              /\/$/,
-              ""
-            )}/${sourceName}.index-${field}.json`;
-
-            await provider.writeFile(
-              filePath,
-              JSON.stringify(indexMap, null, 2)
-            );
+          // ローカルファイルシステム時のみensureDir
+          if (
+            (provider as any).type === "filesystem" ||
+            (provider as any).baseDir !== undefined
+          ) {
+            await ensureDir(dirPath);
           }
+
+          // key_valueごとにファイルを分割出力
+          const keyMap: Record<string, string[]> = {};
+          for (const rec of records) {
+            const value = rec.values[field];
+            if (value == null) continue;
+            for (const v of value.split(" ")) {
+              if (!v) continue;
+              if (!keyMap[v]) keyMap[v] = [];
+              keyMap[v].push(rec.slug);
+            }
+          }
+
+          for (const [keyValue, slugs] of Object.entries(keyMap)) {
+            const filePath = `${dirPath}/${keyValue}.json`;
+            await provider.writeFile(filePath, JSON.stringify(slugs, null, 2));
+          }
+        } else {
+          // 従来方式: {source_name}.index-{field}.json
+          const indexMap: Record<string, string[]> = {};
+
+          for (const rec of records) {
+            const value = rec.values[field];
+            if (value == null) continue;
+            // Support multi-value fields (space-separated)
+            for (const v of value.split(" ")) {
+              if (!v) continue;
+              if (!indexMap[v]) indexMap[v] = [];
+              indexMap[v].push(rec.slug);
+            }
+          }
+
+          const filePath = `${outputDir.replace(
+            /\/$/,
+            ""
+          )}/${sourceName}.index-${field}.json`;
+
+          await provider.writeFile(filePath, JSON.stringify(indexMap, null, 2));
         }
       }
 

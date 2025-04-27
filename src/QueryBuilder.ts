@@ -163,16 +163,43 @@ export class QueryBuilder<T> {
         const sourceSlugs = result.flatMap((row) =>
           getAllFieldValues(row, rel.sourceLocalKey)
         );
-        const uniqueSourceSlugs = Array.from(new Set(sourceSlugs));
+
+        // 中間テーブルが slug でない ≒ loadBySlugs が効かない
+        // その場合インデックスファイルから slug を取得する
+        const uniqueSourceSlugs =
+          rel.throughForeignKey !== "slug"
+            ? (await this.getMatchedSlugsFromIndexFilters(
+                rel.through,
+                [
+                  {
+                    field: rel.throughForeignKey,
+                    op: "in",
+                    value: sourceSlugs,
+                  },
+                ],
+                this.config.sources[rel.through]
+              )) ?? []
+            : Array.from(new Set(sourceSlugs));
+
         const throughData = await this.loader.loadBySlugs(
           rel.through,
           uniqueSourceSlugs
         );
-
         const targetSlugs = throughData.flatMap((t) =>
           getAllFieldValues(t, rel.throughLocalKey)
         );
-        const uniqueTargetSlugs = Array.from(new Set(targetSlugs));
+
+        // 対象テーブルが slug でない ≒ loadBySlugs が効かない
+        // その場合インデックスファイルから slug を取得する
+        const uniqueTargetSlugs =
+          rel.targetForeignKey !== "slug"
+            ? (await this.getMatchedSlugsFromIndexFilters(
+                rel.to,
+                [{ field: rel.targetForeignKey, op: "in", value: targetSlugs }],
+                this.config.sources[rel.through]
+              )) ?? []
+            : Array.from(new Set(targetSlugs));
+
         const targetData = await this.loader.loadBySlugs(
           rel.to,
           uniqueTargetSlugs
