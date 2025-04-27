@@ -6,6 +6,7 @@ dist/
 public/index/
 tests/output/
 tests/types/
+tests/content-test/
 
 .DS_Store
 .vscode/

@@ -5,24 +5,25 @@
  */
 import { ContentDB } from "./ContentDB.js";
 import type { ContentDBConfig } from "./types";
-import { FileSystemProvider } from "./storage/FileSystemProvider.js";
-import { S3Provider } from "./storage/S3Provider.js";
 import type { StorageProvider } from "./storage/StorageProvider.js";
 
 /**
  * ContentDB インスタンスを生成するファクトリ関数
  * @param config - ContentDBConfig 設定オブジェクト
  * @returns ContentDB インスタンス
- * @description
- *   config.storage.type が "s3" の場合は S3Provider、
- *   それ以外は FileSystemProvider（ローカル）を利用
  */
-export function defineContentDB(config: ContentDBConfig): ContentDB {
+export async function defineContentDB(
+  config: ContentDBConfig
+): Promise<ContentDB> {
   let provider: StorageProvider;
 
-  if (config.storage?.type === "s3") {
-    provider = new S3Provider(config.storage);
+  if (config.storage?.type === "r2") {
+    const { R2Provider } = await import("./storage/R2Provider.js");
+    provider = new R2Provider(config.storage.bucket, config.storage.output);
   } else {
+    const { FileSystemProvider } = await import(
+      "./storage/FileSystemProvider.js"
+    );
     provider = new FileSystemProvider(config.storage?.baseDir);
   }
 

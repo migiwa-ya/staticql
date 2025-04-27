@@ -25,7 +25,6 @@ export class ContentDB {
       this.config,
       (this.loader as any).provider
     );
-    const indexer = new Indexer<T>(loader, this.config);
 
     return new QueryBuilder<T>(source, this.config, loader, []);
   }
@@ -36,7 +35,7 @@ export class ContentDB {
    * @returns Promise<void>
    * @throws ストレージ書き込み失敗時に例外
    */
-  async saveIndexesTo(outputDir?: string) {
+  async saveIndexes(outputDir?: string) {
     const output = outputDir ?? this.config.storage.output;
 
     return this.indexer.saveTo(output);
