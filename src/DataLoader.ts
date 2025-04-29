@@ -1,5 +1,5 @@
-import matter from "gray-matter";
 import yaml from "js-yaml";
+import { matter } from "./utils.js";
 import type { ContentDBConfig, SourceConfig } from "./types";
 import type { StorageProvider } from "./storage/StorageProvider";
 
@@ -137,8 +137,8 @@ export class DataLoader<T = unknown> {
     let parsed: unknown;
 
     if (source.type === "markdown") {
-      const { data, content } = matter(raw);
-      parsed = { ...data, content };
+      const { attributes, body } = matter(raw);
+      parsed = { ...attributes, content: body };
     } else if (source.type === "yaml") {
       parsed = yaml.load(raw);
     } else if (source.type === "json") {

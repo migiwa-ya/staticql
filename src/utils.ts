@@ -208,3 +208,141 @@ export function findEntriesByPartialKey<K extends string | undefined, V>(
     .filter(([key]) => key && matchFn(key))
     .map(([, value]) => value);
 }
+
+export function matter(content: string) {
+  const match = content.match(/^---\n([\s\S]+?)\n---\n([\s\S]*)$/);
+  if (!match) return { attributes: {}, body: content };
+
+  const yaml = match[1];
+  const body = match[2];
+
+  const lines = yaml.split("\n");
+  const attributes: any = {};
+  let i = 0;
+  let currentKey: string | null = null;
+  let buffer: string[] = [];
+
+  const commitBuffer = () => {
+    if (!currentKey) return;
+    attributes[currentKey] = parseBlock(buffer);
+    currentKey = null;
+    buffer = [];
+  };
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const keyMatch = line.match(/^(\w[\w\-]*):\s*(.*)$/);
+
+    if (keyMatch) {
+      commitBuffer();
+      currentKey = keyMatch[1];
+      const val = keyMatch[2];
+
+      if (val.trim() !== "") {
+        buffer.push(val.trim());
+      } else {
+        i++;
+        while (i < lines.length) {
+          const nextLine = lines[i];
+          if (nextLine.startsWith(" ") || nextLine.startsWith("-")) {
+            buffer.push(nextLine.trimEnd());
+            i++;
+          } else {
+            break;
+          }
+        }
+        continue;
+      }
+    } else if (currentKey) {
+      buffer.push(line.trimEnd());
+    }
+    i++;
+  }
+  commitBuffer();
+
+  return { attributes, body };
+}
+
+export function parseBlock(lines: string[]) {
+  const nonEmpty = lines.filter(
+    (l) => l.trim() !== "" && !l.trim().startsWith("#")
+  );
+  if (nonEmpty.length === 0) return "";
+
+  // 先頭が "- " で始まっていたらリスト
+  if (nonEmpty[0].trim().startsWith("- ")) {
+    const isObjectList = nonEmpty.some((line) => line.includes(":"));
+
+    if (isObjectList) {
+      const items = [];
+      let current: any = null;
+      for (const line of nonEmpty) {
+        if (line.trim().startsWith("- ")) {
+          if (current) items.push(current);
+          const content = line.slice(2);
+          if (content.includes(":")) {
+            current = {};
+            const [k, ...rest] = content.split(":");
+            current[k.replace("- ", "").trim()] = parseValue(
+              rest.join(":").trim()
+            );
+          } else {
+            current = parseValue(content);
+          }
+        } else if (line.startsWith("  ") && typeof current === "object") {
+          const [k, ...rest] = line.trim().split(":");
+          current[k.replace("- ", "").trim()] = parseValue(
+            rest.join(":").trim()
+          );
+        }
+      }
+      if (current) items.push(current);
+      return items;
+    } else {
+      return nonEmpty.map((line) => parseValue(line.slice(2).trim()));
+    }
+  }
+
+  // 全行が "key: value" 形式ならオブジェクト
+  if (nonEmpty.every((line) => line.includes(": "))) {
+    const obj: any = {};
+    nonEmpty.forEach((line) => {
+      const [k, ...rest] = line.split(":");
+      obj[k.trim()] = parseValue(rest.join(":").trim());
+    });
+    return obj;
+  }
+
+  // それ以外なら単一文字列
+  return parseValue(nonEmpty.join("\n").trim());
+}
+
+export function parseValue(val: string): any {
+  const trimmed = val.trim();
+  if (trimmed === "") return "";
+
+  // 配列表現: [xxx, yyy]
+  if (/^\[.*\]$/.test(trimmed)) {
+    return trimmed
+      .slice(1, -1) // [ と ] を除去
+      .split(",")
+      .map((item: string) => parseValue(item.trim())); // 再帰的にparse
+  }
+
+  if (/^(true|false)$/i.test(trimmed)) {
+    return trimmed.toLowerCase() === "true";
+  }
+
+  if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+    return Number(trimmed);
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)?$/.test(trimmed)) {
+    const d = new Date(trimmed);
+    if (!isNaN(d.getTime())) {
+      return d;
+    }
+  }
+
+  return trimmed;
+}

@@ -1,6 +1,6 @@
 {
   "name": "@migiwa-ya/staticql",
-  "version": "0.13.6",
+  "version": "0.13.7",
   "type": "module",
   "main": "dist/src/index.node.js",
   "types": "./dist/src/index.node.d.ts",
@@ -60,7 +60,6 @@
     "zod-to-ts": "^1.2.0"
   },
   "dependencies": {
-    "gray-matter": "^4.0.3",
     "js-yaml": "^4.1.0",
     "zod": "^3.24.2"
   }

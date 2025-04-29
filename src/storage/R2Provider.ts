@@ -25,7 +25,8 @@ export class R2Provider implements StorageProvider {
   }
 
   async listFiles(prefix: string): Promise<string[]> {
-    const list = await this.bucket.list({ prefix: this.buildKey(prefix) });
+    const path = prefix.replace(/\*.*$/, "");
+    const list = await this.bucket.list({ prefix: path });
 
     return list.objects.map((obj) => obj.key).sort();
   }
@@ -51,7 +52,7 @@ export class R2Provider implements StorageProvider {
 
     const result = list.map((slug) => {
       const filePath = prefix ? `${prefix}/${slug}${ext}` : `${slug}${ext}`;
-      
+
       // -- はディレクトリ階層を示す
       return filePath.replace(/--/g, "/");
     });
