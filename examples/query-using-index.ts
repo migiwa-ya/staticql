@@ -1,6 +1,8 @@
 import db from "../tests/staticql.config.ts";
 
 async function main() {
+  await db.saveIndexes();
+
   const result = await db
     .from("herbs")
     .where("name", "eq", "mentha-piperita")

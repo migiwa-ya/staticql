@@ -184,7 +184,6 @@ sources: {
 ## Fast Querying with Index Files
 
 QueryBuilder は `defineContentDB` の `storage.output` ディレクトリの index ファイルを利用し、比較的高速に検索します。  
-`options({ indexDir: "..." })` でインデックスディレクトリを指定できます。
 
 ### Speed Comparison Example
 
@@ -211,7 +210,7 @@ async function main() {
     loader,
     [],
     indexer
-  ).options({ indexMode: "only", indexDir: "output" });
+  );
   const t1 = Date.now();
   const herbsIndexed = await qbIndexed
     .where("name", "eq", "ペパーミント")
@@ -219,9 +218,7 @@ async function main() {
   const t2 = Date.now();
 
   // Query with full scan
-  const qbScan = new QueryBuilder("herbs", config, loader, [], indexer).options(
-    { indexMode: "none" }
-  );
+  const qbScan = new QueryBuilder("herbs", config, loader, [], indexer);
   const t3 = Date.now();
   const herbsScan = await qbScan.where("name", "eq", "ペパーミント").exec();
   const t4 = Date.now();

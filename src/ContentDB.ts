@@ -30,13 +30,12 @@ export class ContentDB {
   }
 
   /**
-   * 全sourceのインデックス/メタファイルを指定ディレクトリに出力する
-   * @param outputDir - 出力先ディレクトリ
+   * 全sourceのインデックス/メタファイルを config.storage.output ディレクトリに出力する
    * @returns Promise<void>
    * @throws ストレージ書き込み失敗時に例外
    */
-  async saveIndexes(outputDir?: string) {
-    const output = outputDir ?? this.config.storage.output;
+  async saveIndexes() {
+    const output = this.config.storage.output;
 
     return this.indexer.saveTo(output);
   }

@@ -2,10 +2,8 @@ import { describe, it, expect, beforeAll } from "vitest";
 import db from "./staticql.config";
 import { HerbsRecord, ReportsRecord } from "./types/staticql-types";
 
-const OUTPUT_DIR = "tests/output";
-
 beforeAll(async () => {
-  await db.saveIndexes(OUTPUT_DIR);
+  await db.saveIndexes();
 });
 
 describe("QueryBuilder with index optimization", () => {
@@ -13,7 +11,6 @@ describe("QueryBuilder with index optimization", () => {
     const result = await db
       .from("herbs")
       .where("name", "eq", "ペパーミント")
-      .options({ indexDir: OUTPUT_DIR })
       .exec();
 
     expect(result.length).toBe(1);
@@ -24,7 +21,6 @@ describe("QueryBuilder with index optimization", () => {
     const result = await db
       .from<HerbsRecord>("herbs")
       .where("name", "contains", "ペパーミント")
-      .options({ indexDir: OUTPUT_DIR })
       .exec();
 
     expect(result.length).toBeGreaterThan(0);
@@ -35,7 +31,6 @@ describe("QueryBuilder with index optimization", () => {
     const result = await db
       .from("herbs")
       .where("tags", "in", ["refresh", "night"])
-      .options({ indexDir: OUTPUT_DIR })
       .exec();
 
     expect(result.length).toBe(2);
@@ -46,7 +41,6 @@ describe("QueryBuilder with index optimization", () => {
       .from<HerbsRecord>("herbs")
       .join("herbState")
       .where("herbState.name", "eq", "乾燥")
-      .options({ indexDir: OUTPUT_DIR })
       .exec();
 
     expect(result.length).toBeGreaterThan(0);
@@ -58,7 +52,6 @@ describe("QueryBuilder with index optimization", () => {
       .from<ReportsRecord>("reports")
       .join("herbs")
       .where("herbs.name", "eq", "ペパーミント")
-      .options({ indexDir: OUTPUT_DIR })
       .exec();
 
     expect(result.length).toBe(2);

@@ -27,10 +27,39 @@ export class R2Provider implements StorageProvider {
   async listFiles(prefix: string): Promise<string[]> {
     const list = await this.bucket.list({ prefix: this.buildKey(prefix) });
 
-    return list.objects.map((obj) => obj.key);
+    return list.objects.map((obj) => obj.key).sort();
   }
 
-  async readFile(path: string): Promise<Uint8Array | string> {
+  async listFilesByIndex(
+    sourceName: string,
+    indexDir: string,
+    pathString: string
+  ): Promise<string[]> {
+    const indexFilePath = `${indexDir}/${sourceName}.index.json`;
+
+    if (!(await this.exists(indexFilePath))) {
+      return [];
+    }
+
+    const fileContent = await this.readFile(indexFilePath);
+    const list = JSON.parse(fileContent) as string[];
+
+    const ext = pathString.includes(".")
+      ? pathString.substring(pathString.lastIndexOf("."))
+      : "";
+    const prefix = pathString.replace(/\*.*$/, "").replace(/\/$/, "");
+
+    const result = list.map((slug) => {
+      const filePath = prefix ? `${prefix}/${slug}${ext}` : `${slug}${ext}`;
+      
+      // -- はディレクトリ階層を示す
+      return filePath.replace(/--/g, "/");
+    });
+
+    return result.sort();
+  }
+
+  async readFile(path: string): Promise<string> {
     const fullKey = this.buildKey(path);
     const object = await this.bucket.get(fullKey);
     if (!object) return "";

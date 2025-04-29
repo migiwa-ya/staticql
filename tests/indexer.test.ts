@@ -9,7 +9,7 @@ const OUTPUT_DIR = "tests/output";
 
 beforeAll(async () => {
   await fs.rm(OUTPUT_DIR, { recursive: true, force: true });
-  await db.saveIndexes(OUTPUT_DIR);
+  await db.saveIndexes();
 });
 
 describe("HasOneThrough / HasManyThrough Relations", () => {
@@ -33,7 +33,6 @@ describe("Indexer", () => {
       .from<HerbsRecord>("herbs")
       .join("reports")
       .where("slug", "eq", "matricaria-chamomilla")
-      .options({ indexDir: OUTPUT_DIR })
       .exec();
 
     const chamomile = herbs.find((h) => h.slug === "matricaria-chamomilla");

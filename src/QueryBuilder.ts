@@ -19,7 +19,6 @@ export class QueryBuilder<T> {
   private loader: DataLoader<T>;
   private joins: string[] = [];
   private filters: Filter[] = [];
-  private optionsData: { indexDir?: string } = {};
 
   constructor(
     sourceName: string,
@@ -59,20 +58,6 @@ export class QueryBuilder<T> {
     value: string | string[]
   ): QueryBuilder<T> {
     this.filters.push({ field, op, value } as Filter);
-
-    return this;
-  }
-
-  /**
-   * クエリ実行時のオプションを指定する
-   * @param opts - オプションオブジェクト
-   * @returns this（メソッドチェーン可）
-   */
-  options(opts: { indexDir?: string }): this {
-    this.optionsData = {
-      ...this.optionsData,
-      ...opts,
-    };
 
     return this;
   }
@@ -128,7 +113,7 @@ export class QueryBuilder<T> {
         )
       );
     } else {
-      result = await this.loader.load(this.sourceName);
+      result = await this.loader.load(this.sourceName, true);
     }
 
     // join（リレーション）処理
@@ -336,7 +321,7 @@ export class QueryBuilder<T> {
     indexedFilters: Filter[],
     sourceDef: SourceConfig
   ): Promise<string[] | null> {
-    const indexDir = this.optionsData.indexDir || this.config.storage.output;
+    const indexDir = this.config.storage.output;
 
     let indexSlugs: string[] | null = null;
 

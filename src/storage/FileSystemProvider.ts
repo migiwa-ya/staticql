@@ -50,31 +50,63 @@ export class FileSystemProvider implements StorageProvider {
    */
   async listFiles(pathString: string): Promise<string[]> {
     const abs = path.resolve(this.baseDir, pathString.replace(/\*.*$/, ""));
-    const baseDir = this.baseDir;
     const result: string[] = [];
-    const walk = async function* (
-      pathString: string
-    ): AsyncGenerator<string, void, unknown> {
-      if ((await fs.stat(pathString)).isFile()) {
-        yield pathString;
-        return;
-      }
 
-      const dirHandle = await fs.opendir(pathString);
-      for await (const entry of dirHandle) {
-        const full = path.join(pathString, entry.name);
-        if (entry.isDirectory()) {
-          yield* walk(full);
-        } else {
-          yield path.relative(baseDir, full);
-        }
-      }
-    };
+    if ((await fs.stat(abs)).isFile()) {
+      return [abs];
+    }
 
-    for await (const file of walk(abs)) {
+    for await (const file of this.walk(abs)) {
       result.push(file);
     }
 
-    return result;
+    return result.sort();
+  }
+
+  async listFilesByIndex(
+    sourceName: string,
+    indexDir: string,
+    pathString: string
+  ): Promise<string[]> {
+    const abs = path.resolve(this.baseDir, pathString.replace(/\*.*$/, ""));
+    const ext = path.extname(pathString);
+    const result: string[] = [];
+    const indexFilePath = `${indexDir}/${sourceName}.index.json`;
+
+    if ((await fs.stat(abs)).isFile()) {
+      return [abs];
+    }
+
+    if (!(await this.exists(indexFilePath))) {
+      return [];
+    }
+
+    const raw = await this.readFile(indexFilePath);
+    const fileContent =
+      raw instanceof Uint8Array ? new TextDecoder().decode(raw) : raw;
+
+    const list = JSON.parse(fileContent);
+
+    for (const slug of list) {
+      const filePath = path.relative(this.baseDir, path.join(abs, slug)) + ext;
+
+      // -- はディレクトリ階層を示す
+      result.push(filePath.replace(/--/g, "/"));
+    }
+
+    return result.sort();
+  }
+
+  async *walk(pathString: string): AsyncGenerator<string, void, unknown> {
+    const dirHandle = await fs.opendir(pathString);
+
+    for await (const entry of dirHandle) {
+      const full = path.join(pathString, entry.name);
+      if (entry.isDirectory()) {
+        yield* this.walk(full);
+      } else {
+        yield path.relative(this.baseDir, full);
+      }
+    }
   }
 }

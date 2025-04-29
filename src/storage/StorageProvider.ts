@@ -6,10 +6,16 @@
 
 export interface StorageProvider {
   /**
-   * 指定パス配下のファイル一覧を取得（ワイルドカード/プレフィックス対応）
-   * @param pattern 例: "herbs/*.md" または "herbs/"
+   * 指定パスまたはその配下のファイル一覧を取得（ワイルドカード/プレフィックス対応）
+   * @param pattern 例: "herbs/*.md", "herbs/", "herbParts.yaml"
    */
   listFiles(pattern: string): Promise<string[]>;
+
+  listFilesByIndex(
+    sourceName: string,
+    indexDir: string,
+    pattern: string
+  ): Promise<string[]>;
 
   /**
    * ファイルを読み込む

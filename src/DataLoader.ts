@@ -19,7 +19,7 @@ export class DataLoader<T = unknown> {
    * @returns データ配列
    * @throws 未知の source 名やスキーマ不一致時に例外
    */
-  async load(sourceName: string): Promise<T[]> {
+  async load(sourceName: string, useIndex: boolean = false): Promise<T[]> {
     if (this.cache.has(sourceName)) {
       return this.cache.get(sourceName)!;
     }
@@ -27,7 +27,19 @@ export class DataLoader<T = unknown> {
     const source = this.config.sources[sourceName];
     if (!source) throw new Error(`Unknown source: ${sourceName}`);
 
-    const files = await this.provider.listFiles(source.path);
+    let files: string[];
+
+    if (useIndex) {
+      // デフォルト生成の slug インデックスファイルを参照
+      files = await this.provider.listFilesByIndex(
+        sourceName,
+        this.config.storage.output,
+        source.path
+      );
+    } else {
+      files = await this.provider.listFiles(source.path);
+    }
+
     const parsed = await Promise.all(
       files.map((f) => this.parseFile(f, source, f))
     );

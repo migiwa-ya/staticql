@@ -198,6 +198,7 @@ export class Indexer<T extends SourceRecord = SourceRecord> {
       }
       return { slug: row.slug, values };
     });
+
     return { records, indexFields };
   }
 
@@ -292,6 +293,20 @@ export class Indexer<T extends SourceRecord = SourceRecord> {
           await provider.writeFile(filePath, JSON.stringify(indexMap, null, 2));
         }
       }
+
+      // ファイルリスト用インデックスファイル
+      const slugIndexFilePath = `${outputDir.replace(
+        /\/$/,
+        ""
+      )}/${sourceName}.index.json`;
+      await provider.writeFile(
+        slugIndexFilePath,
+        JSON.stringify(
+          records.map((r) => r.slug),
+          null,
+          2
+        )
+      );
 
       // Write a single meta file per source
       if (sourceDef.meta) {
