@@ -10,7 +10,6 @@ import type { StorageProvider } from "./storage/StorageProvider";
 import {
   resolveField,
   extractNestedProperty,
-  ensureDir,
   resolveDirectRelation,
   resolveThroughRelation,
 } from "./utils.js";
@@ -253,14 +252,6 @@ export class Indexer<T extends SourceRecord = SourceRecord> {
             /\/$/,
             ""
           )}/${sourceName}/index-${field}`;
-
-          // ローカルファイルシステム時のみensureDir
-          if (
-            (provider as any).type === "filesystem" ||
-            (provider as any).baseDir !== undefined
-          ) {
-            await ensureDir(dirPath);
-          }
 
           // key_valueごとにファイルを分割出力
           const keyMap: Record<string, string[]> = {};

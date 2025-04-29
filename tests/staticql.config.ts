@@ -1,4 +1,4 @@
-import { defineContentDB } from "../src/index.js";
+import { defineContentDB } from "@migiwa-ya/staticql";
 import { z } from "zod";
 
 export default defineContentDB({

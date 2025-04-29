@@ -1,18 +1,15 @@
 {
   "name": "@migiwa-ya/staticql",
-  "version": "0.13.2",
+  "version": "0.13.3",
   "type": "module",
-  "main": "dist/src/index.js",
-  "types": "dist/src/index.d.ts",
+  "main": "dist/src/index.node.js",
+  "types": "dist/src/index.node.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/src/index.js",
-      "types": "./dist/src/index.d.ts"
-    },
-    "./cli": [
-      "./dist/cli/generate-index.js",
-      "./dist/cli/generate-types.js"
-    ]
+      "node": "./dist/src/index.node.js",
+      "workerd": "./dist/src/index.workerd.js",
+      "default": "./dist/src/index.node.js"
+    }
   },
   "bin": {
     "staticql-gen-index": "dist/cli/generate-index.js",
@@ -20,7 +17,6 @@
   },
   "files": [
     "dist",
-    "cli",
     "!**/*.test.*"
   ],
   "scripts": {

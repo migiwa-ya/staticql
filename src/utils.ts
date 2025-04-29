@@ -1,6 +1,3 @@
-import { promises as fs } from "fs";
-import * as path from "path";
-
 /**
  * オブジェクトからドット記法のパスで値を抽出し、文字列として返す
  * @param obj - 対象オブジェクト
@@ -63,7 +60,10 @@ export function getAllFieldValues(obj: any, fieldPath: string): string[] {
  * @param foreignKeyPath - ドット区切りのパス（例: "a.b.c"）
  * @returns Map<値, 親オブジェクト配列>
  */
-export function buildForeignKeyMap(data: any[], foreignKeyPath: string): Map<string, any[]> {
+export function buildForeignKeyMap(
+  data: any[],
+  foreignKeyPath: string
+): Map<string, any[]> {
   const map = new Map<string, any[]>();
   for (const obj of data) {
     const values = getAllFieldValues(obj, foreignKeyPath);
@@ -167,10 +167,7 @@ export function resolveThroughRelation(
       .includes(sourceKey)
   );
   const targetMap = new Map<string, any>(
-    targetData.map((r: any) => [
-      resolveField(r, rel.targetForeignKey) ?? "",
-      r,
-    ])
+    targetData.map((r: any) => [resolveField(r, rel.targetForeignKey) ?? "", r])
   );
   const targets = throughMatches
     .map((t: any) => {
@@ -210,18 +207,4 @@ export function findEntriesByPartialKey<K extends string | undefined, V>(
   return Array.from(map.entries())
     .filter(([key]) => key && matchFn(key))
     .map(([, value]) => value);
-}
-
-/**
- * 指定ディレクトリがなければ再帰的に作成する
- * @param dirPath - ディレクトリパス
- * @returns Promise<void>
- */
-/**
- * 指定ディレクトリがなければ再帰的に作成する
- * @param dirPath - ディレクトリパス
- * @returns Promise<void>
- */
-export async function ensureDir(dirPath: string): Promise<void> {
-  await fs.mkdir(dirPath, { recursive: true });
 }
