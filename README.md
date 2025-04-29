@@ -187,14 +187,15 @@ QueryBuilder は `defineStaticQL` の `storage.output` ディレクトリの ind
 ### Speed Comparison Example
 
 ```ts
-import define from "staticql.config.ts";
+import define from "../tests/staticql.config.ts";
+import { HerbsRecord } from "../tests/types/staticql-types";
 
 async function main() {
   const staticql = define();
   await staticql.saveIndexes();
 
   const result = await staticql
-    .from("herbs")
+    .from<HerbsRecord>("herbs")
     .where("name", "eq", "mentha-piperita")
     .join("reports")
     .exec();
@@ -246,13 +247,32 @@ CLI・QueryBuilder・Indexer・型生成など全ての I/O が StorageProvider 
 ### 設定例（Cloudflare Workers での R2 バケット利用）
 
 ```ts
+# staticql.config.ts
+
+import { defineStaticQL } from '@migiwa-ya/staticql/workerd';
+import { z } from 'zod';
+
+export default defineStaticQL({
+	storage: {
+		type: 'r2',
+		output: '',
+	},
+	sources: {
+  ...
+  }
+});
+
+```
+
+```ts
 import define from "../staticql.config";
+import { HerbsRecord } from "../types/staticql-types";
 
 export default {
   async fetch(request, env: any, ctx): Promise<Response> {
     const staticql = define(env.MY_BUCKET);
 
-    const herbs = await db.from("herbs").exec();
+    const herbs = await db.from<HerbsRecord>("herbs").exec();
 
     return new Response(herbs[0].name);
   },

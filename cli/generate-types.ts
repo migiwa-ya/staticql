@@ -17,6 +17,9 @@ function unwrapSchema(schema: any): any {
       )
     ) {
       schema = schema._def.schema || schema._def.innerType;
+    } else if (typeName === "ZodArray") {
+      schema = schema._def.type;
+      break;
     } else {
       break;
     }
@@ -172,7 +175,6 @@ async function run() {
   }
 
   await fs.mkdir(path.dirname(outPath), { recursive: true });
-  console.log(typeDefs)
   await fs.writeFile(outPath, typeDefs);
 
   console.log(`Types generated to ${outPath}`);
