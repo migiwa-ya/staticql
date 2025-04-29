@@ -1,15 +1,15 @@
 import { DataLoader } from "./DataLoader.js";
 import { Indexer } from "./Indexer.js";
-import type { ContentDBConfig, SourceRecord } from "./types";
+import type { StaticQLConfig, SourceRecord } from "./types.js";
 import { QueryBuilder } from "./QueryBuilder.js";
-import type { StorageProvider } from "./storage/StorageProvider";
+import type { StorageProvider } from "./storage/StorageProvider.js";
 
-export class ContentDB {
-  private config: ContentDBConfig;
+export class StaticQL {
+  private config: StaticQLConfig;
   private loader: DataLoader<SourceRecord>;
   private indexer: Indexer<SourceRecord>;
 
-  constructor(config: ContentDBConfig, provider: StorageProvider) {
+  constructor(config: StaticQLConfig, provider: StorageProvider) {
     this.config = config;
     this.loader = new DataLoader<SourceRecord>(config, provider);
     this.indexer = new Indexer<SourceRecord>(this.loader, config);
@@ -38,5 +38,13 @@ export class ContentDB {
     const output = this.config.storage.output;
 
     return this.indexer.saveTo(output);
+  }
+
+  /**
+   * 設定情報を返す
+   * @returns StaticQLConfig
+   */
+  getConfig() {
+    return this.config;
   }
 }

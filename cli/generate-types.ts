@@ -1,24 +1,22 @@
 #!/usr/bin/env node
 
-import { zodToTs, createTypeAlias, printNode } from "zod-to-ts";
 import path from "path";
 import { pathToFileURL } from "url";
-import { FileSystemProvider } from "../src/storage/FileSystemProvider.js";
+import { promises as fs } from "fs";
+import { StaticQL } from "../src/StaticQL.js";
 
-// Recursively unwrap ZodEffects, ZodDefault, etc. to get to the base schema
+/**
+ * 型展開用：必要に応じて unwrap する
+ */
 function unwrapSchema(schema: any): any {
   while (schema && schema._def) {
     const typeName = schema._def.typeName;
     if (
-      typeName === "ZodEffects" ||
-      typeName === "ZodDefault" ||
-      typeName === "ZodOptional" ||
-      typeName === "ZodNullable"
+      ["ZodEffects", "ZodDefault", "ZodOptional", "ZodNullable"].includes(
+        typeName
+      )
     ) {
       schema = schema._def.schema || schema._def.innerType;
-    } else if (typeName === "ZodArray") {
-      schema = schema._def.type;
-      break;
     } else {
       break;
     }
@@ -26,101 +24,49 @@ function unwrapSchema(schema: any): any {
   return schema;
 }
 
-// Type guard for Zod schema
-function isZodSchema(obj: any): obj is { _def: any } {
-  return obj && typeof obj === "object" && "_def" in obj;
+/**
+ * ZodスキーマからTS型文字列を作る（再帰）
+ */
+function zodSchemaToTypeString(schema: any): string {
+  const unwrapped = unwrapSchema(schema);
+  if (!unwrapped || !unwrapped._def) return "any";
+
+  const typeName = unwrapped._def.typeName;
+
+  switch (typeName) {
+    case "ZodString":
+      return "string";
+    case "ZodNumber":
+      return "number";
+    case "ZodBoolean":
+      return "boolean";
+    case "ZodDate":
+      return "string";
+    case "ZodLiteral":
+      return JSON.stringify(unwrapped._def.value);
+    case "ZodArray":
+      return `${zodSchemaToTypeString(unwrapped._def.type)}[]`;
+    case "ZodObject":
+      const shape = unwrapped._def.shape();
+      const fields = Object.entries(shape)
+        .map(([key, value]) => `${key}: ${zodSchemaToTypeString(value)}`)
+        .join("; ");
+      return `{ ${fields} }`;
+    default:
+      return "any";
+  }
 }
 
-// Extract record type fields and their types for meta type resolution using Zod schema introspection
-function extractZodFields(schema: any): Record<string, any> {
-  // Do not unwrap at the start! Only unwrap as needed.
-  if (isZodSchema(schema) && schema._def?.typeName === "ZodObject") {
-    const shape = schema._def.shape();
-    const fields: Record<string, any> = {};
-    for (const [key, value] of Object.entries(shape)) {
-      // Check for ZodArray before unwrapping further
-      if (isZodSchema(value) && value._def?.typeName === "ZodArray") {
-        const arrayType = unwrapSchema(value._def.type);
-        if (isZodSchema(arrayType)) {
-          if (arrayType._def?.typeName === "ZodObject") {
-            fields[key] = { arrayOf: extractZodFields(arrayType) };
-          } else {
-            let arrType =
-              arrayType._def?.typeName === "ZodString"
-                ? "string"
-                : arrayType._def?.typeName === "ZodNumber"
-                ? "number"
-                : arrayType._def?.typeName === "ZodBoolean"
-                ? "boolean"
-                : "any";
-            fields[key] = { arrayOf: arrType };
-          }
-        } else {
-          fields[key] = { arrayOf: "any" };
-        }
-      } else if (isZodSchema(value)) {
-        const unwrapped = unwrapSchema(value);
-        if (isZodSchema(unwrapped)) {
-          const typeName = unwrapped._def?.typeName;
-          if (typeName === "ZodObject") {
-            fields[key] = extractZodFields(unwrapped);
-          } else if (typeName === "ZodString") {
-            fields[key] = "string";
-          } else if (typeName === "ZodNumber") {
-            fields[key] = "number";
-          } else if (typeName === "ZodBoolean") {
-            fields[key] = "boolean";
-          } else if (typeName === "ZodLiteral") {
-            fields[key] = JSON.stringify(unwrapped._def.value);
-          } else if (typeName === "ZodDate") {
-            fields[key] = "string";
-          } else {
-            fields[key] = "any";
-          }
-        } else {
-          fields[key] = "any";
-        }
-      } else {
-        fields[key] = "any";
-      }
-    }
-    return fields;
-  }
-  return {};
+/**
+ * 1文字目を大文字化
+ */
+function capitalize(str: string) {
+  return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
-// Helper to check primitive types
-function isPrimitiveType(typeStr: string) {
-  return (
-    typeStr === "string" ||
-    typeStr === "number" ||
-    typeStr === "boolean" ||
-    typeStr === "null" ||
-    typeStr === "undefined" ||
-    typeStr === "any"
-  );
-}
-
-// Helper to convert nested object to TypeScript type string
-function objectToTypeString(obj: any): string {
-  if (obj && typeof obj === "object" && "arrayOf" in obj) {
-    return objectToTypeString(obj.arrayOf) + "[]";
-  }
-  if (Array.isArray(obj)) {
-    return objectToTypeString(obj[0]) + "[]";
-  }
-  if (typeof obj === "object" && obj !== null) {
-    return (
-      "{ " +
-      Object.entries(obj)
-        .map(([k, v]) => `${k}: ${objectToTypeString(v)}`)
-        .join("; ") +
-      " }"
-    );
-  }
-  return String(obj);
-}
-
+/**
+ * メイン処理
+ */
 async function run() {
   const [inputConfig, inputOut] = process.argv.slice(2);
   const configPath = path.resolve(
@@ -128,19 +74,17 @@ async function run() {
     inputConfig || "staticql.config.ts"
   );
   const outputDir = inputOut || "types";
-  const outPath =
-    (outputDir.endsWith("/") ? outputDir : outputDir + "/") +
-    "staticql-types.d.ts";
+  const outPath = path.join(outputDir, "staticql-types.d.ts");
 
-  let db;
+  let staticql: StaticQL;
 
   try {
     const configModule = await import(pathToFileURL(configPath).href);
-    db = await configModule.default;
+    staticql = await configModule.default();
 
-    if (!db) {
+    if (!staticql) {
       throw new Error(
-        "staticql.config.ts が正しく defineContentDB() を export していません。"
+        "staticql.config.ts が正しく defineStaticQL() を export していません。"
       );
     }
   } catch (err) {
@@ -149,228 +93,88 @@ async function run() {
     process.exit(1);
   }
 
-  const sources: Record<string, any> = db.config?.sources || db.sources;
+  const sources: StaticQL["config"]["sources"] = staticql.getConfig()?.sources;
 
-  let typeDefs = `// Auto-generated by cli/generate-types.ts\n\n`;
-
-  // First pass: generate all record, index, and relation types
-  const recordTypeStrings: string[] = [];
-  const indexTypeStrings: string[] = [];
-  const relationTypeStrings: string[] = [];
-  const recordFieldMaps: Record<string, Record<string, string>> = {};
+  let typeDefs = `// Auto-generated by generate-types.ts\n\n`;
 
   for (const [sourceName, sourceDef] of Object.entries(sources)) {
-    // Record type
-    let schema = sourceDef.schema;
-    if (!schema) continue;
-    schema = unwrapSchema(schema);
-    const identifier =
-      sourceName[0].toUpperCase() + sourceName.slice(1) + "Record";
+    const schema = unwrapSchema(sourceDef.schema);
+    const typeName = `${capitalize(sourceName)}Record`;
 
-    let { node } = zodToTs(schema, identifier);
-    const typeAlias = createTypeAlias(node, identifier);
-    let nodeString = printNode(typeAlias);
+    const baseTypeString = zodSchemaToTypeString(schema);
 
-    // If there are relations, append them to the type string
+    let finalTypeString = baseTypeString;
+
+    // relations を型に追加
     if (sourceDef.relations) {
-      const firstBrace = nodeString.indexOf("{");
-      const lastBrace = nodeString.lastIndexOf("}");
-      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-        let body = nodeString.slice(firstBrace + 1, lastBrace).trim();
-        for (const [relKey, relDef] of Object.entries(sourceDef.relations)) {
-          let relType: string = "hasOne";
-          if (
-            relDef &&
-            typeof relDef === "object" &&
-            "type" in relDef &&
-            typeof (relDef as any).type === "string"
-          ) {
-            relType = (relDef as any).type;
-          }
-          const targetSource =
-            relDef && typeof relDef === "object" && "to" in relDef
-              ? (relDef as any).to
-              : "unknown";
-          const targetType =
-            targetSource[0].toUpperCase() + targetSource.slice(1) + "Record";
+      const relationFields = Object.entries(sourceDef.relations)
+        .map(([key, relDef]: any) => {
+          const targetSource = relDef?.to || "unknown";
+          const targetType = `${capitalize(targetSource)}Record`;
+          const relationType = relDef?.type || "hasOne";
           let valueType = targetType;
           if (
-            relType === "hasMany" ||
-            relType === "hasManyThrough" ||
-            relType === "belongsToMany"
+            ["hasMany", "hasManyThrough", "belongsToMany"].includes(
+              relationType
+            )
           ) {
-            valueType = `${targetType}[]`;
-          } else if (relType === "belongsTo") {
-            valueType = `${targetType} | null`;
+            valueType += "[]";
+          } else if (relationType === "belongsTo") {
+            valueType += " | null";
           }
-          body += `\n  ${relKey}?: ${valueType};`;
-        }
-        nodeString =
-          nodeString.slice(0, firstBrace + 1) +
-          "\n" +
-          body +
-          "\n" +
-          nodeString.slice(lastBrace);
-      }
-    }
-    recordTypeStrings.push(`export ${nodeString}\n`);
+          return `${key}?: ${valueType}`;
+        })
+        .join("; ");
 
-    const recordFields = extractZodFields(schema);
-
-    // Add relation fields to recordFields for meta type resolution
-    if (sourceDef.relations) {
-      for (const [relKey, relDef] of Object.entries(sourceDef.relations)) {
-        let relType: string = "hasOne";
-        if (
-          relDef &&
-          typeof relDef === "object" &&
-          "type" in relDef &&
-          typeof (relDef as any).type === "string"
-        ) {
-          relType = (relDef as any).type;
-        }
-        const targetSource =
-          relDef && typeof relDef === "object" && "to" in relDef
-            ? (relDef as any).to
-            : "unknown";
-        const targetType =
-          targetSource[0].toUpperCase() + targetSource.slice(1) + "Record";
-        let valueType = targetType;
-        if (
-          relType === "hasMany" ||
-          relType === "hasManyThrough" ||
-          relType === "belongsToMany"
-        ) {
-          valueType = `${targetType}[]`;
-        } else if (relType === "belongsTo") {
-          valueType = `${targetType} | null`;
-        }
-        recordFields[relKey] = valueType;
-      }
+      finalTypeString = baseTypeString.replace(/^\{/, `{ ${relationFields};`);
     }
 
-    recordFieldMaps[identifier] = recordFields;
+    typeDefs += `export type ${typeName} = ${finalTypeString};\n\n`;
 
-    // Index types
+    // index 型
     if (sourceDef.index) {
       for (const field of sourceDef.index) {
-        indexTypeStrings.push(
-          `export type ${
-            sourceName[0].toUpperCase() + sourceName.slice(1)
-          }Index_${field.replace(/\W/g, "_")} = Record<string, string[]>;\n`
-        );
+        const safeField = field.replace(/\W/g, "_");
+        typeDefs += `export type ${capitalize(
+          sourceName
+        )}Index_${safeField} = Record<string, string[]>;\n\n`;
       }
     }
 
-    // Relation record types
+    // relation型
     if (sourceDef.relations) {
-      for (const [relKey, relDef] of Object.entries(sourceDef.relations)) {
-        let relType: string = "hasOne";
-        if (
-          relDef &&
-          typeof relDef === "object" &&
-          "type" in relDef &&
-          typeof (relDef as any).type === "string"
-        ) {
-          relType = (relDef as any).type;
-        }
-        let valueType = "string";
-        if (
-          relType === "hasMany" ||
-          relType === "hasManyThrough" ||
-          relType === "belongsToMany"
-        ) {
-          valueType = "string[]";
-        } else if (relType === "belongsTo") {
-          valueType = "string | null";
-        }
-        relationTypeStrings.push(
-          `export type ${
-            sourceName[0].toUpperCase() + sourceName.slice(1)
-          }Relation_${relKey} = Record<string, ${valueType}>;\n`
-        );
+      for (const [key, relDef] of Object.entries(sourceDef.relations)) {
+        const targetType = [
+          "hasMany",
+          "hasManyThrough",
+          "belongsToMany",
+        ].includes(relDef.type)
+          ? "string[]"
+          : relDef.type === "belongsTo"
+          ? "string | null"
+          : "string";
+        typeDefs += `export type ${capitalize(
+          sourceName
+        )}Relation_${key} = Record<string, ${targetType}>;\n\n`;
       }
     }
-  }
-  // Second pass: generate all meta types, now that all record types are available
-  const metaTypeStrings: string[] = [];
-  for (const [sourceName, sourceDef] of Object.entries(sources)) {
-    if (!sourceDef.meta) continue;
-    const identifier =
-      sourceName[0].toUpperCase() + sourceName.slice(1) + "Record";
-    const recordFields = recordFieldMaps[identifier];
 
-    let metaType = `export type ${
-      sourceName[0].toUpperCase() + sourceName.slice(1)
-    }Meta = Record<string, {\n`;
-
-    for (const metaField of sourceDef.meta) {
-      let fieldType = "any";
-      const parts = metaField.split(".");
-      let currentType = recordFields[parts[0]];
-
-      if (currentType) {
-        if (parts.length === 1) {
-          fieldType =
-            typeof currentType === "object"
-              ? objectToTypeString(currentType)
-              : currentType;
-        } else {
-          // Recursively resolve nested type for arbitrary depth
-          let typeStr = currentType;
-          let isArray = false;
-          let i = 1;
-          while (i < parts.length && typeStr) {
-            if (typeof typeStr === "string" && typeStr.endsWith("[]")) {
-              isArray = true;
-              typeStr = typeStr.slice(0, -2);
-            }
-            if (isPrimitiveType(typeStr)) {
-              typeStr = "any";
-              break;
-            }
-            // Look up the referenced type in recordFieldMaps
-            const refFields = recordFieldMaps[typeStr];
-            if (refFields) {
-              typeStr = refFields[parts[i]];
-              i++;
-            } else if (typeof typeStr === "object" && typeStr !== null) {
-              // when oject array
-              if (Object.prototype.hasOwnProperty.call(typeStr, "arrayOf")) {
-                typeStr = typeStr["arrayOf"][parts[i]] + "[]";
-                break;
-              } else {
-                typeStr = typeStr[parts[i]];
-                i++;
-              }
-            } else {
-              typeStr = "any";
-              break;
-            }
-          }
-          fieldType = isArray && typeStr ? `${typeStr}[]` : typeStr || "any";
-        }
+    // meta型
+    if (sourceDef.meta) {
+      typeDefs += `export type ${capitalize(
+        sourceName
+      )}Meta = Record<string, {\n`;
+      for (const metaField of sourceDef.meta) {
+        typeDefs += `  "${metaField}": any;\n`;
       }
-
-      // If nested (relational), always allow undefined
-      if (parts.length > 1) {
-        metaType += `  "${metaField}"?: ${fieldType};\n`;
-      } else {
-        metaType += `  "${metaField}": ${fieldType};\n`;
-      }
+      typeDefs += `}>;\n\n`;
     }
-    metaType += `}>;\n\n`;
-    metaTypeStrings.push(metaType);
   }
 
-  // Output all type definitions in the correct order
-  typeDefs += recordTypeStrings.join("") + "\n";
-  typeDefs += indexTypeStrings.join("") + "\n";
-  typeDefs += metaTypeStrings.join("") + "\n";
-  typeDefs += relationTypeStrings.join("") + "\n";
+  await fs.mkdir(path.dirname(outPath), { recursive: true });
+  console.log(typeDefs)
+  await fs.writeFile(outPath, typeDefs);
 
-  const provider = new FileSystemProvider(db.config?.storage?.baseDir);
-  await provider.writeFile(outPath, typeDefs);
   console.log(`Types generated to ${outPath}`);
 }
 

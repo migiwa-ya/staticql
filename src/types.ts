@@ -31,13 +31,11 @@ export type ThroughRelation = {
 
 export type RelationConfig = DirectRelation | ThroughRelation;
 
-import type { R2Bucket } from "./storage/R2Provider";
-
 export type StorageConfig =
   | { type: "filesystem"; baseDir?: string; output: string }
-  | ({ type: "r2"; output: string } & { bucket: R2Bucket });
+  | { type: "r2"; output: string };
 
-export type ContentDBConfig = {
+export type StaticQLConfig = {
   storage: StorageConfig;
   sources: Record<string, SourceConfig>;
 };

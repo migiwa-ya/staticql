@@ -1,14 +1,16 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import db from "./staticql.config";
+import define from "./staticql.config";
 import { HerbsRecord, ReportsRecord } from "./types/staticql-types";
 
+const staticql = define();
+
 beforeAll(async () => {
-  await db.saveIndexes();
+  await staticql.saveIndexes();
 });
 
 describe("QueryBuilder with index optimization", () => {
   it("should find herbs by exact match on indexed field", async () => {
-    const result = await db
+    const result = await staticql
       .from("herbs")
       .where("name", "eq", "ペパーミント")
       .exec();
@@ -18,7 +20,7 @@ describe("QueryBuilder with index optimization", () => {
   });
 
   it("should find herbs by partial match using contains", async () => {
-    const result = await db
+    const result = await staticql
       .from<HerbsRecord>("herbs")
       .where("name", "contains", "ペパーミント")
       .exec();
@@ -28,7 +30,7 @@ describe("QueryBuilder with index optimization", () => {
   });
 
   it("should find herbs by partial match using in", async () => {
-    const result = await db
+    const result = await staticql
       .from("herbs")
       .where("tags", "in", ["refresh", "night"])
       .exec();
@@ -37,7 +39,7 @@ describe("QueryBuilder with index optimization", () => {
   });
 
   it("should support indexed nested field (herbState.name)", async () => {
-    const result = await db
+    const result = await staticql
       .from<HerbsRecord>("herbs")
       .join("herbState")
       .where("herbState.name", "eq", "乾燥")
@@ -48,7 +50,7 @@ describe("QueryBuilder with index optimization", () => {
   });
 
   it("should filter reports by joined herb name", async () => {
-    const result = await db
+    const result = await staticql
       .from<ReportsRecord>("reports")
       .join("herbs")
       .where("herbs.name", "eq", "ペパーミント")

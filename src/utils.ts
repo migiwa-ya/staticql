@@ -329,6 +329,14 @@ export function parseValue(val: string): any {
       .map((item: string) => parseValue(item.trim())); // 再帰的にparse
   }
 
+  // 複数行配列表現
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    return trimmed
+      .replace(/[\[\]\s]+/g, "")
+      .split(",")
+      .filter((e) => e);
+  }
+
   if (/^(true|false)$/i.test(trimmed)) {
     return trimmed.toLowerCase() === "true";
   }

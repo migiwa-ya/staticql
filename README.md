@@ -30,10 +30,10 @@ project/
 ## staticql.config.ts の例
 
 ```ts
-import { defineContentDB } from "@migiwa-ya/staticql";
+import { defineStaticQL } from "@migiwa-ya/staticql";
 import { z } from "zod";
 
-export default defineContentDB({
+export default defineStaticQL({
   storage: {
     type: "filesystem",
     output: "output",
@@ -94,13 +94,12 @@ npx statical-gen-types staticql.config.ts types
 各 source のインデックスファイルや meta ファイルを生成するには、次のコマンドを実行します。
 
 ```bash
-npx staticql-gen-index staticql.config.ts public/index/
+npx staticql-gen-index staticql.config.ts
 ```
 
 - 第一引数: 設定ファイルのパス (例: staticql.config.ts)
-- 第二引数: インデックスファイルの出力ディレクトリ (例: public/index/)
 
-このコマンドにより、各 source ごとに `index-*.json` や `meta.json` などのファイルが指定ディレクトリに出力されます。  
+このコマンドにより、各 source ごとに `index-*.json` や `meta.json` などのファイルが `staticql.config.ts` の `storage.output` に出力されます。  
 出力例: `public/index/herbs.index-name.json`, `public/index/herbs.meta.json` など。
 
 ## Index/Meta File Structure
@@ -140,7 +139,7 @@ output/
 ```
 
 - それぞれのファイル（例: `001.json`）には、そのキー値に該当する slug 配列が格納されます。
-- デフォルト（splitIndexByKey 未指定または false）は従来通り `reportGroups.index-processSlug.json` 1 ファイルに全件が格納されます。
+- デフォルト（splitIndexByKey 未指定または false）は `reportGroups.index-processSlug.json` 1 ファイルに全件が格納されます。
 
 #### どちらを選ぶべきか
 
@@ -183,51 +182,30 @@ sources: {
 
 ## Fast Querying with Index Files
 
-QueryBuilder は `defineContentDB` の `storage.output` ディレクトリの index ファイルを利用し、比較的高速に検索します。  
+QueryBuilder は `defineStaticQL` の `storage.output` ディレクトリの index ファイルを利用し、比較的高速に検索します。
 
 ### Speed Comparison Example
 
 ```ts
-import { QueryBuilder } from "@migiwa-ya/staticql";
-import db from "./staticql.config";
-import { DataLoader } from "@migiwa-ya/staticql";
-import { Indexer } from "@migiwa-ya/staticql";
+import define from "staticql.config.ts";
 
 async function main() {
-  const config =
-    (db as any).config || (db as any)._config || (db as any)["config"];
-  const loader = new DataLoader(config);
-  const indexer = new Indexer(loader, config);
+  const staticql = define();
+  await staticql.saveIndexes();
 
-  // Ensure indexes are built and saved
-  await indexer.buildAll();
-  await indexer.saveTo("output");
-
-  // Query using index
-  const qbIndexed = new QueryBuilder(
-    "herbs",
-    config,
-    loader,
-    [],
-    indexer
-  );
-  const t1 = Date.now();
-  const herbsIndexed = await qbIndexed
-    .where("name", "eq", "ペパーミント")
+  const result = await staticql
+    .from("herbs")
+    .where("name", "eq", "mentha-piperita")
+    .join("reports")
     .exec();
-  const t2 = Date.now();
 
-  // Query with full scan
-  const qbScan = new QueryBuilder("herbs", config, loader, [], indexer);
-  const t3 = Date.now();
-  const herbsScan = await qbScan.where("name", "eq", "ペパーミント").exec();
-  const t4 = Date.now();
-
-  console.log("With index:", herbsIndexed, `Time: ${t2 - t1}ms`);
-  console.log("Full scan:", herbsScan, `Time: ${t4 - t3}ms`);
+  console.log(result);
 }
 
-main();
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
 ```
 
 ## Meta Extraction & Dot Notation
@@ -260,39 +238,19 @@ relations: {
 - QueryBuilder で `.join("processThroughReportGroup")` で利用可能です。
 - meta: ["processThroughReportGroup.name"] のようにドット記法で中間リレーション先の属性も抽出できます。
 
-## Cloudflare R2 ストレージ対応
+## Cloudflare R2 ストレージ対応（Cloudflare Workers）
 
-staticql はローカルファイルだけでなく、Cloudflare R2 ストレージもデータソース・出力先として利用できます。  
+staticql はローカルファイルだけでなく、Cloudflare R2 ストレージもデータソース・出力先として利用できます（Cloudflare Workers での利用のみ）。  
 CLI・QueryBuilder・Indexer・型生成など全ての I/O が StorageProvider で抽象化されており、設定ファイルで storage.type を切り替えるだけでローカル/クラウド両対応となります。
-**なお、現状は Cloudflare Workers での利用を想定しており、バインドされた R2Bucket を渡す必要があるため定義ファイルでは defineContentDB による初期化は行わず、実際に利用するコード内で R2Bucket 参照を渡してから初期化します。**
 
-### 設定例（R2 バケット利用）
-
-```ts
-// staticql.config.ts
-import { z } from "zod";
-import type { ContentDBConfig } from "@migiwa-ya/staticql";
-
-export default {
-  sources: {
-    // ...従来通り
-  },
-} satisfies Omit<ContentDBConfig, "storage">;
-```
+### 設定例（Cloudflare Workers での R2 バケット利用）
 
 ```ts
-import config from "../staticql.config";
-import { defineContentDB } from "@migiwa-ya/staticql";
+import define from "../staticql.config";
 
 export default {
   async fetch(request, env: any, ctx): Promise<Response> {
-    const db = await defineContentDB({
-      ...config,
-      storage: {
-        type: "r2",
-        bucket: env.MY_BUCKET,
-      },
-    });
+    const staticql = define(env.MY_BUCKET);
 
     const herbs = await db.from("herbs").exec();
 

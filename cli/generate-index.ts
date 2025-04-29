@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
 import { pathToFileURL } from "url";
+import { StaticQL } from "../src/StaticQL.js";
 
 async function run() {
-  const [inputConfig, inputOut] = process.argv.slice(2);
+  const [inputConfig] = process.argv.slice(2);
   // Node.js/Workers両対応: 絶対パスならそのまま、相対パスならCWDから連結
   let configPath = inputConfig || "staticql.config.ts";
   if (
@@ -13,17 +14,16 @@ async function run() {
   ) {
     configPath = process.cwd() + "/" + configPath;
   }
-  const outputDir = inputOut;
 
-  let db;
+  let staticql: StaticQL;
 
   try {
     const configModule = await import(pathToFileURL(configPath).href);
-    db = await configModule.default;
+    staticql = await configModule.default();
 
-    if (!db) {
+    if (!staticql) {
       throw new Error(
-        "staticql.config.ts が正しく defineContentDB() を export していません。"
+        "staticql.config.ts が正しく defineStaticQL() を export していません。"
       );
     }
   } catch (err) {
@@ -34,7 +34,7 @@ async function run() {
 
   try {
     console.log("index.json を生成中...");
-    await db.saveIndexes(outputDir);
+    await staticql!.saveIndexes();
     console.log("index.json を生成しました");
   } catch (err) {
     console.error("インデックス生成中にエラーが発生しました");

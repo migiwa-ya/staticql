@@ -1,5 +1,5 @@
 import type { DataLoader } from "./DataLoader.js";
-import type { ContentDBConfig, SourceConfig } from "./types";
+import type { StaticQLConfig, SourceConfig } from "./types";
 import type { StorageProvider } from "./storage/StorageProvider";
 import {
   getAllFieldValues,
@@ -15,14 +15,14 @@ type Filter =
 
 export class QueryBuilder<T> {
   private sourceName: string;
-  private config: ContentDBConfig;
+  private config: StaticQLConfig;
   private loader: DataLoader<T>;
   private joins: string[] = [];
   private filters: Filter[] = [];
 
   constructor(
     sourceName: string,
-    config: ContentDBConfig,
+    config: StaticQLConfig,
     loader: DataLoader<T>,
     joins: string[] = []
   ) {

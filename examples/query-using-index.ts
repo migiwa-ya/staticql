@@ -1,9 +1,10 @@
-import db from "../tests/staticql.config.ts";
+import define from "../tests/staticql.config.ts";
 
 async function main() {
-  await db.saveIndexes();
+  const staticql = define();
+  await staticql.saveIndexes();
 
-  const result = await db
+  const result = await staticql
     .from("herbs")
     .where("name", "eq", "mentha-piperita")
     .join("reports")

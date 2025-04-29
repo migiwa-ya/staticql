@@ -1,7 +1,7 @@
-import { defineContentDB } from "@migiwa-ya/staticql";
+import { defineStaticQL } from "@migiwa-ya/staticql";
 import { z } from "zod";
 
-export default defineContentDB({
+export default defineStaticQL({
   storage: {
     type: "filesystem",
     output: "tests/output",

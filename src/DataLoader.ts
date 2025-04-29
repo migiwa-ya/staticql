@@ -1,14 +1,14 @@
 import yaml from "js-yaml";
 import { matter } from "./utils.js";
-import type { ContentDBConfig, SourceConfig } from "./types";
+import type { StaticQLConfig, SourceConfig } from "./types";
 import type { StorageProvider } from "./storage/StorageProvider";
 
 export class DataLoader<T = unknown> {
-  private config: ContentDBConfig;
+  private config: StaticQLConfig;
   private provider: StorageProvider;
   private cache: Map<string, T[]> = new Map();
 
-  constructor(config: ContentDBConfig, provider: StorageProvider) {
+  constructor(config: StaticQLConfig, provider: StorageProvider) {
     this.config = config;
     this.provider = provider;
   }

@@ -1,6 +1,6 @@
 import { DataLoader } from "./DataLoader.js";
 import {
-  ContentDBConfig,
+  StaticQLConfig,
   SourceRecord,
   SourceConfig,
   RelationConfig,
@@ -22,10 +22,10 @@ import {
  */
 export class Indexer<T extends SourceRecord = SourceRecord> {
   private loader: DataLoader<T>;
-  private config: ContentDBConfig;
+  private config: StaticQLConfig;
   private cache: Record<string, T[]> | null = null;
 
-  constructor(loader: DataLoader<T>, config: ContentDBConfig) {
+  constructor(loader: DataLoader<T>, config: StaticQLConfig) {
     this.loader = loader;
     this.config = config;
   }

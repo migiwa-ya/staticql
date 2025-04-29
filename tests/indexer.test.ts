@@ -1,20 +1,22 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import path from "path";
 import fs from "fs/promises";
-import db from "./staticql.config";
+import define from "./staticql.config";
 import { FileSystemProvider } from "../src/storage/FileSystemProvider";
 import { ReportsRecord, HerbsRecord } from "./types/staticql-types.js";
 
 const OUTPUT_DIR = "tests/output";
 
+const staticql = define();
+
 beforeAll(async () => {
   await fs.rm(OUTPUT_DIR, { recursive: true, force: true });
-  await db.saveIndexes();
+  await staticql.saveIndexes();
 });
 
 describe("HasOneThrough / HasManyThrough Relations", () => {
   it("should resolve hasOneThrough (reports.processThroughReportGroup)", async () => {
-    const reports = await db
+    const reports = await staticql
       .from<ReportsRecord>("reports")
       .join("processThroughReportGroup")
       .exec();
@@ -29,7 +31,7 @@ describe("HasOneThrough / HasManyThrough Relations", () => {
 
 describe("Indexer", () => {
   it("should resolve hasMany relation with array foreignKey (herbs.reports)", async () => {
-    const herbs = await db
+    const herbs = await staticql
       .from<HerbsRecord>("herbs")
       .join("reports")
       .where("slug", "eq", "matricaria-chamomilla")
