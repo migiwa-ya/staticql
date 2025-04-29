@@ -1,13 +1,11 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import path from "path";
 import fs from "fs/promises";
-import staticqlConfig from "./staticql.config";
+import db from "./staticql.config";
 import { FileSystemProvider } from "../src/storage/FileSystemProvider";
 import { ReportsRecord, HerbsRecord } from "./types/staticql-types.js";
 
 const OUTPUT_DIR = "tests/output";
-
-const db = await staticqlConfig;
 
 beforeAll(async () => {
   await fs.rm(OUTPUT_DIR, { recursive: true, force: true });

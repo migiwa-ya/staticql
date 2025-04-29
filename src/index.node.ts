@@ -8,9 +8,7 @@ import { FileSystemProvider } from "./storage/FileSystemProvider.js";
  * @param config - ContentDBConfig 設定オブジェクト
  * @returns ContentDB インスタンス
  */
-export async function defineContentDB(
-  config: ContentDBConfig
-): Promise<ContentDB> {
+export function defineContentDB(config: ContentDBConfig): ContentDB {
   if (config.storage.type === "r2") {
     throw Error("FileSystemProvider is not available in `r2` storage type");
   }

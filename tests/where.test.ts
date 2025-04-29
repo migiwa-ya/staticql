@@ -1,8 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import staticqlConfig from "./staticql.config";
+import db from "./staticql.config";
 import { HerbsRecord, ReportsRecord } from "./types/staticql-types";
-
-const db = await staticqlConfig;
 
 const OUTPUT_DIR = "tests/output";
 

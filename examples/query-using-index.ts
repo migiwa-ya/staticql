@@ -1,7 +1,6 @@
-import config from "../tests/staticql.config.ts";
+import db from "../tests/staticql.config.ts";
 
 async function main() {
-  const db = await config;
   const result = await db
     .from("herbs")
     .where("name", "eq", "mentha-piperita")

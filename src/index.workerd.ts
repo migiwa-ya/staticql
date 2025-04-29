@@ -8,9 +8,7 @@ import { R2Provider } from "./storage/R2Provider.js";
  * @param config - ContentDBConfig 設定オブジェクト
  * @returns ContentDB インスタンス
  */
-export async function defineContentDB(
-  config: ContentDBConfig
-): Promise<ContentDB> {
+export function defineContentDB(config: ContentDBConfig): ContentDB {
   if (config.storage.type !== "r2") {
     throw Error("R2Provider is not available in not `r2` storage type");
   }
