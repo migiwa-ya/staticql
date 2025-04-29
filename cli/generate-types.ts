@@ -31,10 +31,9 @@ function unwrapSchema(schema: any): any {
  * ZodスキーマからTS型文字列を作る（再帰）
  */
 function zodSchemaToTypeString(schema: any): string {
-  const unwrapped = unwrapSchema(schema);
-  if (!unwrapped || !unwrapped._def) return "any";
+  if (!schema || !schema._def) return "any";
 
-  const typeName = unwrapped._def.typeName;
+  const typeName = schema._def.typeName;
 
   switch (typeName) {
     case "ZodString":
@@ -46,15 +45,20 @@ function zodSchemaToTypeString(schema: any): string {
     case "ZodDate":
       return "string";
     case "ZodLiteral":
-      return JSON.stringify(unwrapped._def.value);
+      return JSON.stringify(schema._def.value);
     case "ZodArray":
-      return `${zodSchemaToTypeString(unwrapped._def.type)}[]`;
+      return `${zodSchemaToTypeString(schema._def.type)}[]`;
     case "ZodObject":
-      const shape = unwrapped._def.shape();
+      const shape = schema._def.shape();
       const fields = Object.entries(shape)
         .map(([key, value]) => `${key}: ${zodSchemaToTypeString(value)}`)
         .join("; ");
       return `{ ${fields} }`;
+    case "ZodEffects":
+    case "ZodDefault":
+    case "ZodOptional":
+    case "ZodNullable":
+      return zodSchemaToTypeString(schema._def.schema || schema._def.innerType);
     default:
       return "any";
   }
