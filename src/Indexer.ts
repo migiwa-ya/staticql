@@ -12,6 +12,9 @@ import {
   extractNestedProperty,
   resolveDirectRelation,
   resolveThroughRelation,
+  getFieldIndexFilePath,
+  getSplitIndexFilePath,
+  getSourceIndexFilePath,
 } from "./utils.js";
 
 /**
@@ -249,11 +252,6 @@ export class Indexer<T extends SourceRecord = SourceRecord> {
       for (const field of indexFields) {
         if (sourceDef.splitIndexByKey) {
           // 分割方式: output/{source_name}/index-{field}/{key_value}.json
-          const dirPath = `${outputDir.replace(
-            /\/$/,
-            ""
-          )}/${sourceName}/index-${field}`;
-
           // key_valueごとにファイルを分割出力
           const keyMap: Record<string, string[]> = {};
           for (const rec of records) {
@@ -266,8 +264,14 @@ export class Indexer<T extends SourceRecord = SourceRecord> {
             }
           }
 
+          // utils.ts の getSplitIndexFilePath を利用
           for (const [keyValue, slugs] of Object.entries(keyMap)) {
-            const filePath = `${dirPath}/${keyValue}.json`;
+            const filePath = getSplitIndexFilePath(
+              outputDir.replace(/\/$/, ""),
+              sourceName,
+              field,
+              keyValue
+            );
             await provider.writeFile(filePath, JSON.stringify(slugs, null, 2));
           }
         } else {
@@ -285,20 +289,23 @@ export class Indexer<T extends SourceRecord = SourceRecord> {
             }
           }
 
-          const filePath = `${outputDir.replace(
-            /\/$/,
-            ""
-          )}/${sourceName}.index-${field}.json`;
+          // utils.ts の getFieldIndexFilePath を利用
+          const filePath = getFieldIndexFilePath(
+            outputDir.replace(/\/$/, ""),
+            sourceName,
+            field
+          );
 
           await provider.writeFile(filePath, JSON.stringify(indexMap, null, 2));
         }
       }
 
       // ファイルリスト用インデックスファイル
-      const slugIndexFilePath = `${outputDir.replace(
-        /\/$/,
-        ""
-      )}/${sourceName}.index.json`;
+      // utils.ts の getSourceIndexFilePath を利用
+      const slugIndexFilePath = getSourceIndexFilePath(
+        outputDir.replace(/\/$/, ""),
+        sourceName
+      );
       await provider.writeFile(
         slugIndexFilePath,
         JSON.stringify(
@@ -345,7 +352,7 @@ export class Indexer<T extends SourceRecord = SourceRecord> {
         const filePath = `${outputDir.replace(
           /\/$/,
           ""
-        )}/${sourceName}.meta.json`;
+        )}/meta/${sourceName}.meta.json`;
 
         await provider.writeFile(filePath, JSON.stringify(metaMap, null, 2));
       }

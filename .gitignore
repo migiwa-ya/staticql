@@ -3,10 +3,10 @@ dist/
 .cache/
 .npm/
 
-public/index/
 tests/output/
 tests/types/
 tests/content-test/
+tests/public/
 
 .DS_Store
 .vscode/

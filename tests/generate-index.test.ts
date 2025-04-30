@@ -7,12 +7,12 @@ import { promisify } from "util";
 const exec = promisify(execFile);
 
 const configPath = "tests/staticql.config.ts";
-const outputPath = "tests/output";
-const indexFile = "tests/output/herbs.meta.json";
+const outputPath = "tests/public/index";
+const indexFile = "tests/public/meta/herbs.meta.json";
 
 describe("CLI generate-index.ts", () => {
   beforeAll(async () => {
-    await fs.rm(outputPath, { recursive: true, force: true });
+    // await fs.rm(outputPath, { recursive: true, force: true });
 
     await exec("tsx", [
       path.resolve("cli/generate-index.ts"),

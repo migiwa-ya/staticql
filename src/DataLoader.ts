@@ -1,5 +1,4 @@
-import yaml from "js-yaml";
-import { matter } from "./utils.js";
+import { matter, parseBlock } from "./utils.js";
 import type { StaticQLConfig, SourceConfig } from "./types";
 import type { StorageProvider } from "./storage/StorageProvider";
 
@@ -49,7 +48,9 @@ export class DataLoader<T = unknown> {
         ? parsed.flat()
         : parsed;
 
-    source.schema.parse(flattened);
+    if (typeof source.schema?.parse === "function") {
+      source.schema.parse(flattened);
+    }
     this.cache.set(sourceName, flattened as T[]);
 
     return flattened as T[];
@@ -85,10 +86,14 @@ export class DataLoader<T = unknown> {
       if (Array.isArray(parsed)) {
         const found = parsed.find((item) => item && item.slug === slug);
         if (!found) throw new Error(`slug not found in file: ${filePath}`);
-        source.schema.parse([found]);
+        if (typeof source.schema?.parse === "function") {
+          source.schema.parse([found]);
+        }
         return found as T;
       } else {
-        source.schema.parse([parsed]);
+        if (typeof source.schema?.parse === "function") {
+          source.schema.parse([parsed]);
+        }
         return parsed as T;
       }
     } catch (err) {
@@ -140,7 +145,7 @@ export class DataLoader<T = unknown> {
       const { attributes, body } = matter(raw);
       parsed = { ...attributes, content: body };
     } else if (source.type === "yaml") {
-      parsed = yaml.load(raw);
+      parsed = parseBlock(raw.split(/\r?\n/));
     } else if (source.type === "json") {
       parsed = JSON.parse(raw);
     } else {

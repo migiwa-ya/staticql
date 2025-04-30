@@ -5,12 +5,12 @@ import define from "./staticql.config";
 import { FileSystemProvider } from "../src/storage/FileSystemProvider";
 import { ReportsRecord, HerbsRecord } from "./types/staticql-types.js";
 
-const OUTPUT_DIR = "tests/output";
+const OUTPUT_DIR = "tests/public";
 
 const staticql = define();
 
 beforeAll(async () => {
-  await fs.rm(OUTPUT_DIR, { recursive: true, force: true });
+  // await fs.rm(OUTPUT_DIR, { recursive: true, force: true });
   await staticql.saveIndexes();
 });
 
@@ -47,7 +47,7 @@ describe("Indexer", () => {
   });
 
   it("should output correct meta for dot notation (reports.reportGroupSlug)", async () => {
-    const metaPath = path.join(OUTPUT_DIR, "herbs.meta.json");
+    const metaPath = path.join(OUTPUT_DIR, "/meta/herbs.meta.json");
     const provider = new FileSystemProvider();
     const raw = await provider.readFile(metaPath);
     let meta: string[];

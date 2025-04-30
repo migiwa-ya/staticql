@@ -1,6 +1,7 @@
 import { promises as fs } from "fs";
 import * as path from "path";
 import { StorageProvider } from "./StorageProvider";
+import { getSourceIndexFilePath } from "../utils.js";
 
 /**
  * FileSystemProvider: ローカルファイルシステム用StorageProvider実装
@@ -71,7 +72,7 @@ export class FileSystemProvider implements StorageProvider {
     const abs = path.resolve(this.baseDir, pathString.replace(/\*.*$/, ""));
     const ext = path.extname(pathString);
     const result: string[] = [];
-    const indexFilePath = `${indexDir}/${sourceName}.index.json`;
+    const indexFilePath = getSourceIndexFilePath(indexDir, sourceName);
 
     if ((await fs.stat(abs)).isFile()) {
       return [abs];

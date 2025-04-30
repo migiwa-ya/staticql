@@ -1,21 +1,21 @@
 import { StaticQL } from "./StaticQL.js";
 import type { StaticQLConfig } from "./types.js";
 import type { StorageProvider } from "./storage/StorageProvider.js";
-import { FileSystemProvider } from "./storage/FileSystemProvider.js";
+import { BrowserStorageProvider } from "./storage/BrowserStorageProvider.js";
 
 /**
- * StaticQL インスタンスを生成するファクトリ関数
+ * StaticQL インスタンスを生成するファクトリ関数（ブラウザ用）
  * @param config - StaticQLConfig 設定オブジェクト
  * @returns StaticQL ファクトリー
  */
 export function defineStaticQL(config: StaticQLConfig) {
   return () => {
-    if (config.storage.type !== "filesystem") {
-      throw Error("FileSystemProvider needs `r2` storage type");
+    if (config.storage.type !== "browser") {
+      throw Error("BrowserStorageProvider needs `browser` storage type");
     }
 
     let provider: StorageProvider;
-    provider = new FileSystemProvider(config.storage?.baseDir);
+    provider = new BrowserStorageProvider(config.storage?.baseUrl || "/");
 
     return new StaticQL(config, provider);
   };

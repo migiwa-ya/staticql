@@ -1,4 +1,5 @@
 import { StorageProvider } from "./StorageProvider";
+import { getSourceIndexFilePath } from "../utils.js";
 
 export interface R2Bucket {
   put(key: string, value: string | ArrayBuffer | ReadableStream): Promise<void>;
@@ -36,7 +37,7 @@ export class R2Provider implements StorageProvider {
     indexDir: string,
     pathString: string
   ): Promise<string[]> {
-    const indexFilePath = `${indexDir}/${sourceName}.index.json`;
+    const indexFilePath = getSourceIndexFilePath(indexDir, sourceName);
 
     if (!(await this.exists(indexFilePath))) {
       return [];

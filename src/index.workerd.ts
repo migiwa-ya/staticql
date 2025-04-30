@@ -11,7 +11,7 @@ import { R2Provider, R2Bucket } from "./storage/R2Provider.js";
 export function defineStaticQL(config: StaticQLConfig) {
   return (bucket: R2Bucket) => {
     if (config.storage.type !== "r2") {
-      throw Error("R2Provider is not available in not `r2` storage type");
+      throw Error("R2Provider needs `r2` storage type");
     }
 
     const provider: StorageProvider = new R2Provider(

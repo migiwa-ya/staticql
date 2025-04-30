@@ -4,11 +4,11 @@ import { z } from "zod";
 export default defineStaticQL({
   storage: {
     type: "filesystem",
-    output: "tests/output",
+    output: "tests/public/",
   },
   sources: {
     herbs: {
-      path: "tests/content-fixtures/herbs/*.md",
+      path: "tests/public/content/herbs/*.md",
       type: "markdown",
       schema: z.array(
         z.object({
@@ -37,7 +37,7 @@ export default defineStaticQL({
     },
 
     herbStates: {
-      path: "tests/content-fixtures/herbStates.yaml",
+      path: "tests/public/content/herbStates.yaml",
       type: "yaml",
       schema: z.array(
         z.object({
@@ -48,7 +48,7 @@ export default defineStaticQL({
     },
 
     reports: {
-      path: "tests/content-fixtures/reports/**/*.md",
+      path: "tests/public/content/reports/**/*.md",
       type: "markdown",
       schema: z.array(
         z.object({
@@ -100,7 +100,7 @@ export default defineStaticQL({
     },
 
     reportGroups: {
-      path: "tests/content-fixtures/reportGroups.yaml",
+      path: "tests/public/content/reportGroups.yaml",
       type: "yaml",
       schema: z.array(
         z.object({
@@ -112,7 +112,7 @@ export default defineStaticQL({
     },
 
     processes: {
-      path: "tests/content-fixtures/processes.yaml",
+      path: "tests/public/content/processes.yaml",
       type: "yaml",
       schema: z.array(
         z.object({

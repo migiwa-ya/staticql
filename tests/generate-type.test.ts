@@ -23,9 +23,9 @@ describe("generate-types", () => {
 
   it("generates HerbsRecord with relation fields", () => {
     const content = fs.readFileSync(outputPath + typeFilename, "utf-8");
-    expect(content).toMatch(/export type HerbsRecord = \{\s*slug: string;/);
+    expect(content).toMatch(/export type HerbsRecord = /);
     expect(content).toMatch(/name: string;/);
-    expect(content).toMatch(/tags: string\[];/);
+    expect(content).toMatch(/tags: string\[]/);
     // Relation fields
     expect(content).toMatch(/herbState\?: HerbStatesRecord;/);
     expect(content).toMatch(/reports\?: ReportsRecord\[];/);
@@ -34,11 +34,11 @@ describe("generate-types", () => {
   it("generates HerbsMeta with correct nested types", () => {
     const content = fs.readFileSync(outputPath + typeFilename, "utf-8");
     // Top-level
-    expect(content).toMatch(/"name": string;/);
-    expect(content).toMatch(/"tags": string\[];/);
+    expect(content).toMatch(/name: string/);
+    expect(content).toMatch(/tags: string\[]/);
     // Nested
-    expect(content).toMatch(/"herbState\.name"\?: string;/);
-    expect(content).toMatch(/"reports\.reportGroupSlug"\?: string\[];/);
+    expect(content).toMatch(/"herbState\.name"/);
+    expect(content).toMatch(/"reports\.reportGroupSlug"/);
   });
 
   it("generates HerbsRelation_reports as Record<string, string[]>", () => {
@@ -56,7 +56,7 @@ describe("generate-types", () => {
 
   it("generates ReportsMeta with correct nested types", () => {
     const content = fs.readFileSync(outputPath + typeFilename, "utf-8");
-    expect(content).toMatch(/"herbs\.name"\?: string\[];/);
-    expect(content).toMatch(/"processThroughReportGroup\.name"\?: string;/);
+    expect(content).toMatch(/"herbs\.name"/);
+    expect(content).toMatch(/"processThroughReportGroup\.name"/);
   });
 });

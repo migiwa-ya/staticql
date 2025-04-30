@@ -33,7 +33,8 @@ export type RelationConfig = DirectRelation | ThroughRelation;
 
 export type StorageConfig =
   | { type: "filesystem"; baseDir?: string; output: string }
-  | { type: "r2"; output: string };
+  | { type: "r2"; output: string }
+  | { type: "browser"; baseUrl: string, output: '' };
 
 export type StaticQLConfig = {
   storage: StorageConfig;

@@ -5,6 +5,9 @@ import {
   getAllFieldValues,
   resolveDirectRelation,
   resolveThroughRelation,
+  getSplitIndexFilePath,
+  getFieldIndexFilePath,
+  getIndexDir,
 } from "./utils.js";
 
 type Operator = "eq" | "contains" | "in";
@@ -333,11 +336,14 @@ export class QueryBuilder<T> {
       if (sourceDef.splitIndexByKey) {
         // 分割インデックスファイル方式
 
-        const dirPath = `${indexDir}/${sourceName}/index-${field}`;
-
         if (op === "eq") {
           const keyValue = String(value);
-          const filePath = `${dirPath}/${keyValue}.json`;
+          const filePath = getSplitIndexFilePath(
+            indexDir,
+            sourceName,
+            field,
+            keyValue
+          );
 
           try {
             let raw = await provider.readFile(filePath);
@@ -355,7 +361,12 @@ export class QueryBuilder<T> {
           }
         } else if (op === "in" && Array.isArray(value)) {
           for (const keyValue of value) {
-            const filePath = `${dirPath}/${keyValue}.json`;
+            const filePath = getSplitIndexFilePath(
+              indexDir,
+              sourceName,
+              field,
+              keyValue
+            );
 
             try {
               let raw = await provider.readFile(filePath);
@@ -378,7 +389,7 @@ export class QueryBuilder<T> {
 
           try {
             files = await provider.listFiles(
-              `${indexDir}/${sourceName}/index-${field}/`
+              `${getIndexDir(indexDir)}/${sourceName}/index-${field}/`
             );
           } catch {
             files = [];
@@ -408,7 +419,7 @@ export class QueryBuilder<T> {
       } else {
         // 単一インデックスファイル方式
         let indexMap: Record<string, string[]> | null = null;
-        const filePath = `${indexDir}/${sourceName}.index-${field}.json`;
+        const filePath = getFieldIndexFilePath(indexDir, sourceName, field);
 
         try {
           let raw = await provider.readFile(filePath);
