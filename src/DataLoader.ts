@@ -1,6 +1,6 @@
-import { matter, parseBlock } from "./utils.js";
 import type { StaticQLConfig, SourceConfig } from "./types";
 import type { StorageProvider } from "./storage/StorageProvider";
+import { parseMarkdown, parseYAML } from "./utils/parser.js";
 
 export class DataLoader<T = unknown> {
   private config: StaticQLConfig;
@@ -142,10 +142,10 @@ export class DataLoader<T = unknown> {
     let parsed: unknown;
 
     if (source.type === "markdown") {
-      const { attributes, body } = matter(raw);
+      const { attributes, body } = parseMarkdown(raw);
       parsed = { ...attributes, content: body };
     } else if (source.type === "yaml") {
-      parsed = parseBlock(raw.split(/\r?\n/));
+      parsed = parseYAML(raw);
     } else if (source.type === "json") {
       parsed = JSON.parse(raw);
     } else {

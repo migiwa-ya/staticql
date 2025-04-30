@@ -1,7 +1,7 @@
 import { promises as fs } from "fs";
 import * as path from "path";
 import { StorageProvider } from "./StorageProvider";
-import { getSourceIndexFilePath } from "../utils.js";
+import { getSourceIndexFilePath } from "../utils/path.js";
 
 /**
  * FileSystemProvider: ローカルファイルシステム用StorageProvider実装

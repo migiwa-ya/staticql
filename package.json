@@ -1,6 +1,6 @@
 {
   "name": "@migiwa-ya/staticql",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "type": "module",
   "main": "dist/src/index.node.js",
   "types": "./dist/src/index.node.d.ts",
@@ -59,7 +59,6 @@
   "license": "MIT",
   "description": "Type-safe query engine for Markdown/YAML/JSON-based static content.",
   "devDependencies": {
-    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.14.0",
     "tsx": "^4.19.3",
     "typescript": "^5.8.3",

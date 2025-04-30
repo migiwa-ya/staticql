@@ -1,14 +1,16 @@
 import type { DataLoader } from "./DataLoader.js";
 import type { StaticQLConfig, SourceConfig } from "./types";
 import type { StorageProvider } from "./storage/StorageProvider";
+import { getAllFieldValues } from "./utils/field.js";
 import {
-  getAllFieldValues,
   resolveDirectRelation,
   resolveThroughRelation,
-  getSplitIndexFilePath,
+} from "./utils/relation.js";
+import {
   getFieldIndexFilePath,
   getIndexDir,
-} from "./utils.js";
+  getSplitIndexFilePath,
+} from "./utils/path.js";
 
 type Operator = "eq" | "contains" | "in";
 

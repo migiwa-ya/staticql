@@ -1,8 +1,5 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import path from "path";
-import fs from "fs/promises";
 import define from "./staticql.config";
-import { FileSystemProvider } from "../src/storage/FileSystemProvider";
 import { ReportsRecord, HerbsRecord } from "./types/staticql-types.js";
 
 const OUTPUT_DIR = "tests/public";

@@ -104,6 +104,13 @@ export default defineStaticQL({
         z.object({
           slug: z.string(),
           processSlug: z.string(),
+          combinedHerbs: z.array(
+            z.object({
+              slug: z.string(),
+              herbStateSlug: z.string(),
+              herbPartSlug: z.string(),
+            })
+          ),
         })
       ),
       index: ["processSlug"],

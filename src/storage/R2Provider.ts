@@ -1,5 +1,5 @@
+import { getSourceIndexFilePath } from "../utils/path.js";
 import { StorageProvider } from "./StorageProvider";
-import { getSourceIndexFilePath } from "../utils.js";
 
 export interface R2Bucket {
   put(key: string, value: string | ArrayBuffer | ReadableStream): Promise<void>;

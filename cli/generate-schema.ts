@@ -6,12 +6,12 @@ import { StaticQL } from "../src/StaticQL.js";
 import { StaticQLConfig } from "../src/types.js";
 import { ZodTypeAny, ZodArray, ZodObject } from "zod";
 import { writeFileSync, mkdirSync } from "fs";
-import { dirname, join } from "path";
+import { join } from "path";
 import {
-  getSplitIndexFilePath,
   getFieldIndexFilePath,
   getSourceIndexFilePath,
-} from "../src/utils.js";
+  getSplitIndexFilePath,
+} from "../src/utils/path.js";
 
 function zodToJsonSchema(zodSchema: ZodTypeAny): any {
   if (zodSchema instanceof ZodArray) {

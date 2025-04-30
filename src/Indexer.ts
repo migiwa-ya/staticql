@@ -8,11 +8,11 @@ import {
 } from "./types";
 import type { StorageProvider } from "./storage/StorageProvider";
 import {
-  resolveField,
   getFieldIndexFilePath,
-  getSplitIndexFilePath,
   getSourceIndexFilePath,
-} from "./utils.js";
+  getSplitIndexFilePath,
+} from "./utils/path.js";
+import { resolveField } from "./utils/field.js";
 
 /**
  * Indexer: インデックス・メタファイル生成の中核クラス
