@@ -165,17 +165,6 @@ async function run() {
         )}Relation_${key} = Record<string, ${targetType}>;\n\n`;
       }
     }
-
-    // meta型
-    if (sourceDef.meta) {
-      typeDefs += `export type ${capitalize(
-        sourceName
-      )}Meta = Record<string, {\n`;
-      for (const metaField of sourceDef.meta) {
-        typeDefs += `  "${metaField}": any;\n`;
-      }
-      typeDefs += `}>;\n\n`;
-    }
   }
 
   await fs.mkdir(path.dirname(outPath), { recursive: true });

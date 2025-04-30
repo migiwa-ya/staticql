@@ -9,9 +9,6 @@ import {
 import type { StorageProvider } from "./storage/StorageProvider";
 import {
   resolveField,
-  extractNestedProperty,
-  resolveDirectRelation,
-  resolveThroughRelation,
   getFieldIndexFilePath,
   getSplitIndexFilePath,
   getSourceIndexFilePath,
@@ -20,7 +17,6 @@ import {
 /**
  * Indexer: インデックス・メタファイル生成の中核クラス
  * - 各sourceのデータからインデックス/メタファイルを生成
- * - 多段リレーション・ドット記法・型安全なmeta抽出をサポート
  * - 共通化されたリレーション解決ロジックを利用
  */
 export class Indexer<T extends SourceRecord = SourceRecord> {
@@ -314,151 +310,6 @@ export class Indexer<T extends SourceRecord = SourceRecord> {
           2
         )
       );
-
-      // Write a single meta file per source
-      if (sourceDef.meta) {
-        // Load the original data to preserve array/object structure
-        const originalData = await this.loader.load(sourceName);
-        const metaMap: Record<string, Record<string, any>> = {};
-
-        // Preload all relation data for efficiency
-        const relationData: Record<string, any> = {};
-
-        if (sourceDef.relations) {
-          for (const relKey of Object.keys(sourceDef.relations)) {
-            const rel = sourceDef.relations[relKey];
-
-            if (
-              "through" in rel &&
-              (rel.type === "hasOneThrough" || rel.type === "hasManyThrough")
-            ) {
-              // Through relation
-              const throughData = await this.loader.load(rel.through);
-              const targetData = await this.loader.load(rel.to);
-              relationData[relKey] = { throughData, targetData, rel };
-            } else {
-              // Direct relation
-              const foreignData = await this.loader.load(rel.to);
-              relationData[relKey] = { foreignData, rel };
-            }
-          }
-        }
-
-        for (const row of originalData) {
-          const metaObj = this.extractMetaForRow(row, sourceDef, relationData);
-          metaMap[row.slug] = metaObj;
-        }
-
-        const filePath = `${outputDir.replace(
-          /\/$/,
-          ""
-        )}/meta/${sourceName}.meta.json`;
-
-        await provider.writeFile(filePath, JSON.stringify(metaMap, null, 2));
-      }
     }
-  }
-
-  /**
-   * 1レコードのmeta情報をリレーション・ドット記法含めて抽出する
-   * @param row - 対象データレコード
-   * @param sourceDef - source定義
-   * @param relationData - 事前ロード済みのリレーションデータ
-   * @returns meta情報オブジェクト
-   */
-  private extractMetaForRow(
-    row: any,
-    sourceDef: any,
-    relationData: Record<string, any>
-  ): Record<string, any> {
-    const metaObj: Record<string, any> = {};
-
-    for (const field of sourceDef.meta) {
-      const parts = field.split(".");
-
-      if (
-        parts.length > 1 &&
-        sourceDef.relations &&
-        sourceDef.relations[parts[0]]
-      ) {
-        // Relation property
-        const relKey = parts[0];
-        const relProp = parts.slice(1);
-        const rel = sourceDef.relations[relKey];
-        let relValue: any;
-
-        if (
-          "through" in rel &&
-          (rel.type === "hasOneThrough" || rel.type === "hasManyThrough")
-        ) {
-          relValue = resolveThroughRelation(
-            row,
-            rel,
-            relationData[relKey].throughData,
-            relationData[relKey].targetData
-          );
-        } else {
-          relValue = resolveDirectRelation(
-            row,
-            rel,
-            relationData[relKey].foreignData
-          );
-        }
-
-        // Now, access the nested property using the utility
-        if (Array.isArray(relValue)) {
-          const values = extractNestedProperty(relValue, relProp);
-          metaObj[field] = Array.from(new Set(values));
-        } else if (relValue && typeof relValue === "object") {
-          const arr = extractNestedProperty([relValue], relProp);
-          // metaで指定されたプロパティが配列かどうかで判定
-          const prop0 = relProp[0];
-          const isArrayProp = Array.isArray(
-            Array.isArray(relValue) ? relValue[0]?.[prop0] : relValue[prop0]
-          );
-          if (isArrayProp) {
-            metaObj[field] = Array.from(new Set(arr));
-          } else {
-            metaObj[field] =
-              arr.length === 1 ? arr[0] : Array.from(new Set(arr));
-          }
-        } else {
-          metaObj[field] = undefined;
-        }
-      } else if (sourceDef.relations && sourceDef.relations[field]) {
-        // Top-level relation (no dot)
-        const rel = sourceDef.relations[field];
-        let relValue: any;
-
-        if (
-          "through" in rel &&
-          (rel.type === "hasOneThrough" || rel.type === "hasManyThrough")
-        ) {
-          relValue = resolveThroughRelation(
-            row,
-            rel,
-            relationData[field].throughData,
-            relationData[field].targetData
-          );
-        } else {
-          relValue = resolveDirectRelation(
-            row,
-            rel,
-            relationData[field].foreignData
-          );
-        }
-
-        if (rel.type === "hasOneThrough" || rel.type === "hasOne") {
-          metaObj[field] = relValue ?? null;
-        } else {
-          metaObj[field] = relValue ?? [];
-        }
-      } else if (row[field] !== undefined) {
-        // Not a relation, use original value
-        metaObj[field] = row[field];
-      }
-    }
-
-    return metaObj;
   }
 }

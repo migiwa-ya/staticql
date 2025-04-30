@@ -45,25 +45,4 @@ describe("Indexer", () => {
     expect(reportSlugs.length).toBeGreaterThan(0);
     expect(reportSlugs).toContain("reportGroup001--001");
   });
-
-  it("should output correct meta for dot notation (reports.reportGroupSlug)", async () => {
-    const metaPath = path.join(OUTPUT_DIR, "/meta/herbs.meta.json");
-    const provider = new FileSystemProvider();
-    const raw = await provider.readFile(metaPath);
-    let meta: string[];
-    if (raw instanceof Uint8Array) {
-      meta = JSON.parse(new TextDecoder().decode(raw));
-    } else {
-      meta = JSON.parse(raw);
-    }
-    const chamomileMeta = meta["matricaria-chamomilla"];
-    expect(chamomileMeta).toBeTruthy();
-    // reports.reportGroupSlug should be a flat array of all reportGroupSlugs from related reports
-    expect(Array.isArray(chamomileMeta["reports.reportGroupSlug"])).toBe(true);
-    expect(chamomileMeta["reports.reportGroupSlug"].length).toBeGreaterThan(0);
-    // Should contain a known reportGroupSlug
-    expect(chamomileMeta["reports.reportGroupSlug"]).toContain(
-      "reportGroup001"
-    );
-  });
 });

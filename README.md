@@ -91,7 +91,7 @@ npx statical-gen-types staticql.config.ts types
 
 ### インデックスファイルの生成
 
-各 source のインデックスファイルや meta ファイルを生成するには、次のコマンドを実行します。
+各 source のインデックスファイルを生成するには、次のコマンドを実行します。
 
 ```bash
 npx staticql-gen-index staticql.config.ts
@@ -99,15 +99,13 @@ npx staticql-gen-index staticql.config.ts
 
 - 第一引数: 設定ファイルのパス (例: staticql.config.ts)
 
-このコマンドにより、各 source ごとに `index-*.json` や `meta.json` などのファイルが `staticql.config.ts` の `storage.output` に出力されます。  
-出力例: `public/index/herbs.index-name.json`, `public/index/herbs.meta.json` など。
+このコマンドにより、各 source ごとに `index-*.json` などのファイルが `staticql.config.ts` の `storage.output` に出力されます。  
+出力例: `public/index/herbs.index-name.json` など。
 
-## Index/Meta File Structure
+## Index File Structure
 
 - 各 source ごとに、`index-{field}.json`（インデックスファイル）が出力されます。  
   例: `herbs.index-name.json` は name ごとの slug 配列を持ちます。
-- `meta.json` ファイルは、meta: [] で指定した属性やリレーションの値を slug ごとにまとめて出力します。
-- ドット記法（例: `"reports.reportGroupSlug"`）でリレーション先の属性も抽出できます。
 
 ### インデックスファイルの分割方式（splitIndexByKey）
 
@@ -146,40 +144,6 @@ output/
 - データ量が少ない場合や全件一括ロードが許容される場合は従来方式で十分です。
 - データ量が多くインデックスファイルが巨大化する場合は、分割方式（splitIndexByKey: true）を推奨します。
 
-## Meta Extraction (meta: [])
-
-- `meta: []` を指定すると、各 source ごとに `{source}.meta.json` が出力されます。
-- meta.json は slug ごとに、指定した属性・リレーション・ドット記法の値をまとめたオブジェクトです。
-
-### 設定例
-
-```ts
-sources: {
-  herbs: {
-    // ...
-    meta: ["name", "tags", "herbState.name", "reports.reportGroupSlug"],
-  }
-}
-```
-
-### 出力例（herbs.meta.json）
-
-```json
-{
-  "matricaria-chamomilla": {
-    "name": "カモミール",
-    "tags": ["リラックス", "消化"],
-    "herbState.name": "乾燥",
-    "reports.reportGroupSlug": ["reportGroup001", "reportGroup002"]
-  },
-  ...
-}
-```
-
-- hasMany リレーションや配列フィールドはフラットな配列になります。
-- ドット記法でリレーション先の属性も抽出できます。
-- through リレーションや多段リレーションもサポートしています。
-
 ## Fast Querying with Index Files
 
 QueryBuilder は `defineStaticQL` の `storage.output` ディレクトリの index ファイルを利用し、比較的高速に検索します。
@@ -209,11 +173,6 @@ main().catch((err) => {
 });
 ```
 
-## Meta Extraction & Dot Notation
-
-- meta: ["reports.reportGroupSlug"] のようにドット記法でリレーション先の属性も抽出できます。
-- hasMany リレーションの場合は値がフラットな配列になります。
-
 ## Through Relations (hasOneThrough / hasManyThrough)
 
 - Through リレーションは、中間テーブル（モデル）を経由してリレーションを定義できます。
@@ -237,7 +196,6 @@ relations: {
 
 - `hasOneThrough` も同様に type を指定できます。
 - QueryBuilder で `.join("processThroughReportGroup")` で利用可能です。
-- meta: ["processThroughReportGroup.name"] のようにドット記法で中間リレーション先の属性も抽出できます。
 
 ## Cloudflare R2 ストレージ対応（Cloudflare Workers）
 

@@ -33,7 +33,6 @@ export default defineStaticQL({
       },
       index: ["name", "herbState.name", "reports.reportGroupSlug", "tags"],
       splitIndexByKey: true,
-      meta: ["name", "tags", "herbState.name", "reports.reportGroupSlug"],
     },
 
     herbStates: {
@@ -96,7 +95,6 @@ export default defineStaticQL({
         "herbs.name",
         "processThroughReportGroup.name",
       ],
-      meta: ["herbs.name", "processThroughReportGroup.name"],
     },
 
     reportGroups: {
