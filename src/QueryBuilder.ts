@@ -335,7 +335,10 @@ export class QueryBuilder<T> {
       const provider: StorageProvider = (this.loader as any).provider;
       let matched: string[] = [];
 
-      if (sourceDef.splitIndexByKey) {
+      if (field === "slug") {
+        // slug 検索の場合はそのまま返す
+        matched.push(String(value));
+      } else if (sourceDef.splitIndexByKey) {
         // 分割インデックスファイル方式
 
         if (op === "eq") {

@@ -1,4 +1,4 @@
-import { defineStaticQL } from "../dist/src/index.browser.js";
+import { defineStaticQL } from "@migiwa-ya/staticql/browser"
 
 // staticql.schema.json を fetch して初期化
 async function main() {

@@ -15,7 +15,7 @@ export function defineStaticQL(config: StaticQLConfig) {
     }
 
     let provider: StorageProvider;
-    provider = new BrowserStorageProvider(config.storage?.baseUrl || "/");
+    provider = new BrowserStorageProvider(config.storage?.baseUrl || "/", config);
 
     return new StaticQL(config, provider);
   };

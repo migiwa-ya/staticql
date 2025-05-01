@@ -7,6 +7,7 @@ export type SourceConfig = {
   type: SourceType;
   schema: z.ZodType<any, any>;
   index?: string[];
+  indexes?: Record<string, string>;
   relations?: Record<string, RelationConfig>;
   splitIndexByKey?: boolean;
 };

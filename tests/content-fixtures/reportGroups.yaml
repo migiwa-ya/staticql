@@ -1,5 +1,13 @@
 - slug: reportGroup001
   processSlug: infusion
+  combinedHerbs:
+    - slug: rumex-crispus
+      herbStateSlug: dry
+      herbPartSlug: root
 
 - slug: reportGroup002
   processSlug: tincture
+  combinedHerbs:
+    - slug: rumex-crispus
+      herbStateSlug: dry
+      herbPartSlug: root

@@ -74,9 +74,17 @@ function isOptional(z: any): boolean {
   return name === "ZodOptional" || name === "ZodDefault";
 }
 
+function removePublicPath(path: string): string {
+  return path.replace(/.*public\/?/, "");
+}
+
 function createSchema(config: StaticQLConfig, outDir: string) {
   const out: any = {
-    storage: config.storage,
+    storage: {
+      type: "browser",
+      baseUrl: "",
+      output: "",
+    },
     sources: {},
   };
 
@@ -87,9 +95,10 @@ function createSchema(config: StaticQLConfig, outDir: string) {
   for (const [name, source] of Object.entries(config.sources)) {
     const schemaFileRel = `schema/${name}.schema.json`;
     const sourceOut: any = {
-      path: source.path,
+      path: removePublicPath(source.path),
       type: source.type,
       schemaPath: schemaFileRel,
+      splitIndexByKey: source.splitIndexByKey,
     };
 
     if (source.relations) {
@@ -119,7 +128,7 @@ function createSchema(config: StaticQLConfig, outDir: string) {
     const uniqueIndexFields = Array.from(new Set(indexFields));
 
     const indexes: any = {
-      all: getSourceIndexFilePath(outputDir, name),
+      all: removePublicPath(getSourceIndexFilePath(outputDir, name)),
       fields: [],
       split: [],
     };
@@ -127,9 +136,13 @@ function createSchema(config: StaticQLConfig, outDir: string) {
     for (const field of uniqueIndexFields) {
       if (source.splitIndexByKey) {
         // 分割方式: ワイルドカードで表現
-        indexes.split.push(getSplitIndexFilePath(outputDir, name, field, "*"));
+        indexes.split.push(
+          removePublicPath(getSplitIndexFilePath(outputDir, name, field, "*"))
+        );
       } else {
-        indexes.fields.push(getFieldIndexFilePath(outputDir, name, field));
+        indexes.fields.push(
+          removePublicPath(getFieldIndexFilePath(outputDir, name, field))
+        );
       }
     }
 

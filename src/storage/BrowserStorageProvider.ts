@@ -1,3 +1,4 @@
+import { StaticQLConfig } from "../types";
 import type { StorageProvider } from "./StorageProvider";
 
 /**
@@ -6,20 +7,11 @@ import type { StorageProvider } from "./StorageProvider";
  */
 export class BrowserStorageProvider implements StorageProvider {
   baseUrl: string;
-  schemaUrl: string;
-  schemaCache: any | null = null;
+  schema: StaticQLConfig;
 
-  constructor(baseUrl: string = "/", schemaUrl: string = "/staticql.schema.json") {
+  constructor(baseUrl: string = "/", schema: StaticQLConfig) {
     this.baseUrl = baseUrl.replace(/\/+$/, "") + "/";
-    this.schemaUrl = schemaUrl.startsWith("/") ? schemaUrl : "/" + schemaUrl;
-  }
-
-  async ensureSchemaLoaded() {
-    if (this.schemaCache) return;
-    const url = this.baseUrl + this.schemaUrl.replace(/^\/+/, "");
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`Failed to fetch schema: ${url}`);
-    this.schemaCache = await res.json();
+    this.schema = schema;
   }
 
   async readFile(path: string): Promise<string> {
@@ -37,18 +29,20 @@ export class BrowserStorageProvider implements StorageProvider {
 
   // pattern例: "herbs/*.md", "herbs/", "herbParts.yaml"
   async listFiles(pattern: string): Promise<string[]> {
-    await this.ensureSchemaLoaded();
     // sourceName を pattern から推定（最初のスラッシュ/ドット/拡張子前まで）
     const m = pattern.match(/^([^\/\.\*]+)/);
     const sourceName = m ? m[1] : null;
-    if (!sourceName || !this.schemaCache.sources[sourceName]) return [];
+    if (!sourceName || !this.schema.sources[sourceName]) return [];
 
     // ワイルドカード除去
-    const basePath = pattern.replace(/\*.*$/, "").replace(/\/$/, "") || (this.schemaCache.sources[sourceName].path || sourceName);
+    const basePath =
+      pattern.replace(/\*.*$/, "").replace(/\/$/, "") ||
+      this.schema.sources[sourceName].path ||
+      sourceName;
 
     // indexes.all は slug の配列
-    const slugs: string[] = this.schemaCache.sources[sourceName]?.indexes?.all
-      ? await this._fetchIndexFile(this.schemaCache.sources[sourceName].indexes.all)
+    const slugs: string[] = this.schema.sources[sourceName]?.indexes?.all
+      ? await this._fetchIndexFile(this.schema.sources[sourceName].indexes.all)
       : [];
 
     // pattern の拡張子を抽出
@@ -81,12 +75,11 @@ export class BrowserStorageProvider implements StorageProvider {
     indexDir: string,
     pattern: string
   ): Promise<string[]> {
-    await this.ensureSchemaLoaded();
-    if (!this.schemaCache.sources[sourceName]) return [];
+    if (!this.schema.sources[sourceName]) return [];
 
     // indexes.all は slug の配列
-    const slugs: string[] = this.schemaCache.sources[sourceName]?.indexes?.all
-      ? await this._fetchIndexFile(this.schemaCache.sources[sourceName].indexes.all)
+    const slugs: string[] = this.schema.sources[sourceName]?.indexes?.all
+      ? await this._fetchIndexFile(this.schema.sources[sourceName].indexes.all)
       : [];
 
     // pattern の拡張子を抽出
@@ -94,7 +87,10 @@ export class BrowserStorageProvider implements StorageProvider {
     const ext = extMatch ? "." + extMatch[1] : "";
 
     // ワイルドカード除去
-    const basePath = pattern.replace(/\*.*$/, "").replace(/\/$/, "") || (this.schemaCache.sources[sourceName].path || sourceName);
+    const basePath =
+      pattern.replace(/\*.*$/, "").replace(/\/$/, "") ||
+      this.schema.sources[sourceName].path ||
+      sourceName;
 
     // slug からファイルパスを生成
     let files = slugs.map((slug) => {
