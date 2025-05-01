@@ -29,45 +29,12 @@ export class BrowserStorageProvider implements StorageProvider {
 
   // pattern例: "herbs/*.md", "herbs/", "herbParts.yaml"
   async listFiles(pattern: string): Promise<string[]> {
-    // sourceName を pattern から推定（最初のスラッシュ/ドット/拡張子前まで）
+    // sourceName を pattern から推定
     const m = pattern.match(/^([^\/\.\*]+)/);
     const sourceName = m ? m[1] : null;
     if (!sourceName || !this.schema.sources[sourceName]) return [];
-
-    // ワイルドカード除去
-    const basePath =
-      pattern.replace(/\*.*$/, "").replace(/\/$/, "") ||
-      this.schema.sources[sourceName].path ||
-      sourceName;
-
-    // indexes.all は slug の配列
-    const slugs: string[] = this.schema.sources[sourceName]?.indexes?.all
-      ? await this._fetchIndexFile(this.schema.sources[sourceName].indexes.all)
-      : [];
-
-    // pattern の拡張子を抽出
-    const extMatch = pattern.match(/\.(\w+)$/);
-    const ext = extMatch ? "." + extMatch[1] : "";
-
-    // slug からファイルパスを生成
-    let files = slugs.map((slug) => {
-      return `${basePath}/${slug}${ext}`;
-    });
-
-    // 最低限のフィルタ: 拡張子・ワイルドカード
-    if (pattern.includes("*")) {
-      const regex = new RegExp(
-        "^" +
-          pattern
-            .replace(/\./g, "\\.")
-            .replace(/\*/g, ".*")
-            .replace(/\//g, "\\/") +
-          "$"
-      );
-      files = files.filter((f) => regex.test(f));
-    }
-
-    return files;
+    // listFilesByIndexにバイパス
+    return this.listFilesByIndex(sourceName, "", pattern);
   }
 
   async listFilesByIndex(
@@ -92,23 +59,31 @@ export class BrowserStorageProvider implements StorageProvider {
       this.schema.sources[sourceName].path ||
       sourceName;
 
+    // slugフィルタ: patternをslugの--区切りに対応した正規表現に変換
+    let filteredSlugs = slugs;
+    if (pattern.includes("*")) {
+      // patternからワイルドカード部分のみ抽出
+      // 例: reports/**/*.md → '**/*.md'
+      const wcIdx = pattern.indexOf("*");
+      let slugPattern = pattern.slice(wcIdx);
+      // ワイルドカード部分の / を -- に変換
+      slugPattern = slugPattern.replace(/\//g, "--");
+      // 拡張子を除去
+      slugPattern = slugPattern.replace(/\.[^\.]+$/, "");
+      // **, * を正規表現に変換
+      slugPattern = slugPattern
+        .replace(/\*\*/g, "([\\w-]+(--)?)*")
+        .replace(/\*/g, "[\\w-]+");
+      const regex = new RegExp("^" + slugPattern + "$");
+      filteredSlugs = slugs
+        .filter((slug) => regex.test(slug))
+        .map((slug) => slug.replace("--", "/"));
+    }
+
     // slug からファイルパスを生成
-    let files = slugs.map((slug) => {
+    const files = filteredSlugs.map((slug) => {
       return `${basePath}/${slug}${ext}`;
     });
-
-    // 最低限のフィルタ: 拡張子・ワイルドカード
-    if (pattern.includes("*")) {
-      const regex = new RegExp(
-        "^" +
-          pattern
-            .replace(/\./g, "\\.")
-            .replace(/\*/g, ".*")
-            .replace(/\//g, "\\/") +
-          "$"
-      );
-      files = files.filter((f) => regex.test(f));
-    }
 
     return files;
   }
