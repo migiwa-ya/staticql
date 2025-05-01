@@ -1,10 +1,7 @@
 import { promises as fs } from "fs";
 import * as path from "path";
 import { StorageProvider } from "./StorageProvider";
-import {
-  getSourceIndexFilePath,
-  slugsToFilePaths,
-} from "../utils/path.js";
+import { getSourceIndexFilePath, slugsToFilePaths } from "../utils/path.js";
 
 /**
  * FileSystemProvider: ローカルファイルシステム用StorageProvider実装
@@ -77,6 +74,11 @@ export class FileSystemProvider implements StorageProvider {
 
     if (!(await this.exists(indexFilePath))) {
       return [];
+    }
+
+    // pathString がワイルドカードでない＝単一インデックスファイルのため、そのまま返す
+    if (!pathString.includes("*") && (await fs.stat(pathString)).isFile()) {
+      return [pathString];
     }
 
     const raw = await this.readFile(indexFilePath);
