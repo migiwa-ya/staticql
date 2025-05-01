@@ -31,6 +31,13 @@ export interface StorageProvider {
   writeFile(path: string, data: Uint8Array | string): Promise<void>;
 
   /**
+   * ファイルを削除する
+   * @param path
+   * @param data
+   */
+  removeFile(path: string): Promise<void>;
+
+  /**
    * ファイルの存在確認
    * @param path
    */

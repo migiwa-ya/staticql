@@ -5,7 +5,7 @@ import { pathToFileURL } from "url";
 import { StaticQL } from "../src/StaticQL.js";
 import { StaticQLConfig } from "../src/types.js";
 import { ZodTypeAny, ZodArray, ZodObject } from "zod";
-import { writeFileSync, mkdirSync } from "fs";
+import { writeFileSync, mkdirSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import {
   getFieldIndexFilePath,
@@ -170,6 +170,20 @@ async function run() {
     inputConfig || "staticql.config.ts"
   );
   const outDir = inputOut || "public";
+
+  // 生成前に出力対象ファイル・ディレクトリを削除
+  const schemaDir = join(outDir, "schema");
+  const schemaJson = join(outDir, "staticql.schema.json");
+  try {
+    if (existsSync(schemaDir)) {
+      rmSync(schemaDir, { recursive: true, force: true });
+    }
+    if (existsSync(schemaJson)) {
+      rmSync(schemaJson, { force: true });
+    }
+  } catch (e) {
+    // ignore
+  }
 
   let staticql: StaticQL;
 

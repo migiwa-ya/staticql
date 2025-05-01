@@ -1,6 +1,7 @@
 import type { StaticQLConfig, SourceConfig } from "./types";
 import type { StorageProvider } from "./storage/StorageProvider";
 import { parseMarkdown, parseYAML } from "./utils/parser.js";
+import { getSlugFromPath, slugsToFilePaths } from "./utils/path.js";
 
 export class DataLoader<T = unknown> {
   private config: StaticQLConfig;
@@ -70,11 +71,9 @@ export class DataLoader<T = unknown> {
 
     let filePath: string;
 
-    // glob（*）を含む場合は従来通りslug→ファイル名変換
+    // glob（*）を含む場合は共通関数でパス解決
     if (source.path.includes("*")) {
-      const ext = this.getExtname(source.path);
-      const relativePath = slug.replace(/--/g, "/") + ext;
-      filePath = this.resolveFilePath(source.path, relativePath);
+      filePath = slugsToFilePaths(source.path, [slug])[0];
     } else {
       // それ以外はsource.pathをそのまま使う
       filePath = source.path;
@@ -158,7 +157,7 @@ export class DataLoader<T = unknown> {
       typeof parsed === "object" &&
       parsed !== null
     ) {
-      const slugFromPath = this.getSlugFromPath(source.path, filePath);
+      const slugFromPath = getSlugFromPath(source.path, filePath);
 
       // 型ガード: parsedはRecord<string, unknown>型として扱う
       const parsedObj = parsed as Record<string, unknown>;
@@ -186,48 +185,5 @@ export class DataLoader<T = unknown> {
     if (i === -1) return "";
 
     return p.slice(i);
-  }
-
-  /**
-   * ファイルパスからslug（論理ID）を生成
-   * @param sourcePath - 設定で定義されたsourceのパス（glob含む）
-   * @param filePath - 実際のファイルパス
-   * @returns slug文字列
-   */
-  private getSlugFromPath(sourcePath: string, filePath: string): string {
-    const ext = this.getExtname(filePath);
-    const baseDir = this.extractBaseDir(sourcePath);
-    let rel = filePath.startsWith(baseDir)
-      ? filePath.slice(baseDir.length)
-      : filePath;
-    if (rel.startsWith("/")) rel = rel.slice(1);
-    const slug = rel.replace(ext, "").replace(/\//g, "--");
-
-    return slug;
-  }
-
-  /**
-   * sourcePathからワイルドカードより前のディレクトリ部分を抽出
-   * @param globPath - globを含むパス
-   * @returns ディレクトリパス
-   */
-  private extractBaseDir(globPath: string): string {
-    const parts = globPath.split("/");
-    const index = parts.findIndex((part) => part.includes("*"));
-    if (index === -1) return globPath;
-
-    return parts.slice(0, index).join("/") + "/";
-  }
-
-  /**
-   * sourceGlob, relativePathから論理パスを生成
-   * @param sourceGlob - globを含むパス
-   * @param relativePath - 相対パス
-   * @returns 論理パス
-   */
-  private resolveFilePath(sourceGlob: string, relativePath: string): string {
-    const baseDir = this.extractBaseDir(sourceGlob);
-
-    return baseDir + relativePath;
   }
 }

@@ -1,5 +1,6 @@
 import { StaticQLConfig } from "../types";
 import type { StorageProvider } from "./StorageProvider";
+import { slugsToFilePaths } from "../utils/path.js";
 
 /**
  * ブラウザ用 StorageProvider: public/ 配下のファイルを fetch で読み込む
@@ -49,43 +50,8 @@ export class BrowserStorageProvider implements StorageProvider {
       ? await this._fetchIndexFile(this.schema.sources[sourceName].indexes.all)
       : [];
 
-    // pattern の拡張子を抽出
-    const extMatch = pattern.match(/\.(\w+)$/);
-    const ext = extMatch ? "." + extMatch[1] : "";
-
-    // ワイルドカード除去
-    const basePath =
-      pattern.replace(/\*.*$/, "").replace(/\/$/, "") ||
-      this.schema.sources[sourceName].path ||
-      sourceName;
-
-    // slugフィルタ: patternをslugの--区切りに対応した正規表現に変換
-    let filteredSlugs = slugs;
-    if (pattern.includes("*")) {
-      // patternからワイルドカード部分のみ抽出
-      // 例: reports/**/*.md → '**/*.md'
-      const wcIdx = pattern.indexOf("*");
-      let slugPattern = pattern.slice(wcIdx);
-      // ワイルドカード部分の / を -- に変換
-      slugPattern = slugPattern.replace(/\//g, "--");
-      // 拡張子を除去
-      slugPattern = slugPattern.replace(/\.[^\.]+$/, "");
-      // **, * を正規表現に変換
-      slugPattern = slugPattern
-        .replace(/\*\*/g, "([\\w-]+(--)?)*")
-        .replace(/\*/g, "[\\w-]+");
-      const regex = new RegExp("^" + slugPattern + "$");
-      filteredSlugs = slugs
-        .filter((slug) => regex.test(slug))
-        .map((slug) => slug.replace("--", "/"));
-    }
-
-    // slug からファイルパスを生成
-    const files = filteredSlugs.map((slug) => {
-      return `${basePath}/${slug}${ext}`;
-    });
-
-    return files;
+    // 共通関数でslugフィルタ・パス生成
+    return slugsToFilePaths(pattern, slugs);
   }
 
   async _fetchIndexFile(indexPath: string): Promise<string[]> {
@@ -100,5 +66,9 @@ export class BrowserStorageProvider implements StorageProvider {
 
   async writeFile(path: string, data: Uint8Array | string): Promise<void> {
     throw new Error("writeFile is not supported in browser environment");
+  }
+
+  async removeFile(path: string): Promise<void> {
+    throw new Error("removeFile is not supported in browser environment");
   }
 }

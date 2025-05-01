@@ -1,4 +1,13 @@
 import { DataLoader } from "./DataLoader.js";
+
+/**
+ * 差分更新用エントリ型
+ */
+export type DiffEntry = {
+  status: "A" | "M" | "D" | "R";
+  path: string;
+  oldPath?: string;
+};
 import {
   StaticQLConfig,
   SourceRecord,
@@ -11,6 +20,8 @@ import {
   getFieldIndexFilePath,
   getSourceIndexFilePath,
   getSplitIndexFilePath,
+  getIndexDir,
+  getSlugFromPath,
 } from "./utils/path.js";
 import { resolveField } from "./utils/field.js";
 
@@ -297,7 +308,6 @@ export class Indexer<T extends SourceRecord = SourceRecord> {
       }
 
       // ファイルリスト用インデックスファイル
-      // utils.ts の getSourceIndexFilePath を利用
       const slugIndexFilePath = getSourceIndexFilePath(
         outputDir.replace(/\/$/, ""),
         sourceName
@@ -309,6 +319,251 @@ export class Indexer<T extends SourceRecord = SourceRecord> {
           null,
           2
         )
+      );
+    }
+  }
+
+  /**
+   * 差分情報に基づき、関連インデックスファイルのみを更新する（スケルトン）
+   * @param outputDir - 出力先ディレクトリ
+   * @param diffEntries - 差分情報配列
+   */
+  async updateIndexesForFiles(
+    outputDir: string,
+    diffEntries: DiffEntry[]
+  ): Promise<void> {
+    // diffEntiries をソースごとに整理
+    const sourceMap: Record<string, DiffEntry[]> = {};
+    for (const entry of diffEntries) {
+      const path = entry.path;
+      for (const [sourceName, sourceDef] of Object.entries(
+        this.config.sources
+      )) {
+        const baseDir = sourceDef.path.replace(/\*.*$/, "");
+        const ext = sourceDef.path.split(".").pop();
+        if (path.startsWith(baseDir) && (!ext || path.endsWith("." + ext))) {
+          if (!sourceMap[sourceName]) sourceMap[sourceName] = [];
+          sourceMap[sourceName].push(entry);
+          break;
+        }
+      }
+    }
+
+    // 各sourceNameごとにA/M/R/Dのslugリストを抽出
+    const perSourceSlugs: Record<
+      string,
+      {
+        addOrUpdate: string[];
+        delete: string[];
+        rename: { oldSlug: string; newSlug: string }[];
+      }
+    > = {};
+
+    for (const [sourceName, entries] of Object.entries(sourceMap)) {
+      const sourceDef = this.config.sources[sourceName];
+      const addOrUpdate: string[] = [];
+      const deleteList: string[] = [];
+      const renameList: { oldSlug: string; newSlug: string }[] = [];
+      for (const entry of entries) {
+        if (entry.status === "A" || entry.status === "M") {
+          addOrUpdate.push(getSlugFromPath(sourceDef.path, entry.path));
+        } else if (entry.status === "D") {
+          // 削除はoldPathまたはpath
+          deleteList.push(
+            getSlugFromPath(sourceDef.path, entry.oldPath || entry.path)
+          );
+        } else if (entry.status === "R") {
+          // リネームは両方
+          renameList.push({
+            oldSlug: getSlugFromPath(sourceDef.path, entry.oldPath || ""),
+            newSlug: getSlugFromPath(sourceDef.path, entry.path),
+          });
+        }
+      }
+      perSourceSlugs[sourceName] = {
+        addOrUpdate,
+        delete: deleteList,
+        rename: renameList,
+      };
+    }
+
+    const provider: StorageProvider = (this.loader as any).provider;
+
+    for (const [
+      sourceName,
+      { addOrUpdate, delete: deleteList, rename },
+    ] of Object.entries(perSourceSlugs)) {
+      const sourceDef = this.config.sources[sourceName];
+      // インデックス対象フィールドを取得
+      const { indexFields } = await this.buildSourceIndex(
+        sourceName,
+        sourceDef
+      );
+
+      // 追加・更新・リネーム新slug: レコードをロードしインデックス再生成
+      const slugsToUpsert = [...addOrUpdate, ...rename.map((r) => r.newSlug)];
+      let records: T[] = [];
+      if (slugsToUpsert.length > 0) {
+        records = await this.loader.loadBySlugs(sourceName, slugsToUpsert);
+      }
+
+      // 各indexFieldごとにインデックスファイルを更新
+      for (const field of indexFields) {
+        if (sourceDef.splitIndexByKey) {
+          // 分割方式: 各slugの値ごとにファイルを再生成
+          const keyMap: Record<string, Set<string>> = {};
+          for (const rec of records) {
+            const value = resolveField(rec, field);
+            if (value == null) continue;
+            for (const v of String(value).split(" ")) {
+              if (!v) continue;
+              if (!keyMap[v]) keyMap[v] = new Set();
+              keyMap[v].add(rec.slug);
+            }
+          }
+          // 書き出し
+          for (const [keyValue, slugSet] of Object.entries(keyMap)) {
+            const filePath = getSplitIndexFilePath(
+              outputDir.replace(/\/$/, ""),
+              sourceName,
+              field,
+              keyValue
+            );
+            await provider.writeFile(
+              filePath,
+              JSON.stringify(Array.from(slugSet), null, 2)
+            );
+          }
+        } else {
+          // 単一ファイル方式: indexMapを部分的に更新
+          // 既存indexMapを読み込み
+          const filePath = getFieldIndexFilePath(
+            outputDir.replace(/\/$/, ""),
+            sourceName,
+            field
+          );
+          let indexMap: Record<string, string[]> = {};
+          try {
+            const raw = await provider.readFile(filePath);
+            indexMap = JSON.parse(
+              typeof raw === "string" ? raw : new TextDecoder().decode(raw)
+            );
+          } catch {
+            indexMap = {};
+          }
+
+          // 対象slugの値でindexMapを更新
+          for (const rec of records) {
+            const value = resolveField(rec, field);
+            if (value == null) continue;
+            for (const v of String(value).split(" ")) {
+              if (!v) continue;
+              if (!indexMap[v]) indexMap[v] = [];
+              if (!indexMap[v].includes(rec.slug)) indexMap[v].push(rec.slug);
+            }
+          }
+
+          await provider.writeFile(filePath, JSON.stringify(indexMap, null, 2));
+        }
+      }
+
+      // 削除slugリスト（delete/renameのoldSlug）
+      const slugsToDelete = [...deleteList, ...rename.map((r) => r.oldSlug)];
+
+      // 各indexFieldごとに削除slugをインデックスから除外
+      for (const field of indexFields) {
+        if (sourceDef.splitIndexByKey) {
+          // 分割方式: 各slugの値ごとにファイルを削除または更新
+          // indexディレクトリ: output/{source}/index-{field}/
+          const indexDir = `${getIndexDir(
+            outputDir
+          )}/${sourceName}/index-${field}`;
+          let files: string[] = [];
+          try {
+            files = await (provider as any).listFiles(indexDir);
+          } catch {
+            files = [];
+          }
+          for (const file of files) {
+            let slugs: string[] = [];
+            try {
+              const raw = await provider.readFile(file);
+              slugs = JSON.parse(
+                typeof raw === "string" ? raw : new TextDecoder().decode(raw)
+              );
+            } catch {
+              continue;
+            }
+            // 削除slugを除外
+            const filtered = slugs.filter(
+              (slug) => !slugsToDelete.includes(slug)
+            );
+            if (filtered.length === 0) {
+              // 空になったらファイル削除
+              if (provider.removeFile) {
+                await provider.removeFile(file);
+              }
+            } else if (filtered.length !== slugs.length) {
+              // 変更があれば上書き
+              await provider.writeFile(file, JSON.stringify(filtered, null, 2));
+            }
+          }
+        } else {
+          // 単一ファイル方式: indexMapから該当slugを除外
+          const filePath = getFieldIndexFilePath(
+            outputDir.replace(/\/$/, ""),
+            sourceName,
+            field
+          );
+          let indexMap: Record<string, string[]> = {};
+          try {
+            const raw = await provider.readFile(filePath);
+            indexMap = JSON.parse(
+              typeof raw === "string" ? raw : new TextDecoder().decode(raw)
+            );
+          } catch {
+            indexMap = {};
+          }
+          // 各値ごとにslugを除外
+          for (const v of Object.keys(indexMap)) {
+            indexMap[v] = indexMap[v].filter(
+              (slug) => !slugsToDelete.includes(slug)
+            );
+            // 空配列になったら削除
+            if (indexMap[v].length === 0) {
+              delete indexMap[v];
+            }
+          }
+
+          await provider.writeFile(filePath, JSON.stringify(indexMap, null, 2));
+        }
+      }
+
+      // slugリストファイル（source.index.json）からも削除
+      const slugIndexFilePath = getSourceIndexFilePath(
+        outputDir.replace(/\/$/, ""),
+        sourceName
+      );
+
+      let slugList: string[] = [];
+      try {
+        const raw = await provider.readFile(slugIndexFilePath);
+        slugList = JSON.parse(
+          typeof raw === "string" ? raw : new TextDecoder().decode(raw)
+        );
+      } catch {
+        slugList = [];
+      }
+
+      // addOrUpdate/rename新slugは追加（重複除外）、delete/rename旧slugは除外
+      const newSlugs = [...addOrUpdate, ...rename.map((r) => r.newSlug)];
+      slugList = slugList.filter((slug) => !slugsToDelete.includes(slug));
+      for (const slug of newSlugs) {
+        if (!slugList.includes(slug)) slugList.push(slug);
+      }
+      await provider.writeFile(
+        slugIndexFilePath,
+        JSON.stringify(slugList, null, 2)
       );
     }
   }

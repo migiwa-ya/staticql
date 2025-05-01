@@ -1,4 +1,4 @@
-import { getSourceIndexFilePath } from "../utils/path.js";
+import { getSourceIndexFilePath, slugsToFilePaths } from "../utils/path.js";
 import { StorageProvider } from "./StorageProvider";
 
 export interface R2Bucket {
@@ -46,19 +46,7 @@ export class R2Provider implements StorageProvider {
     const fileContent = await this.readFile(indexFilePath);
     const list = JSON.parse(fileContent) as string[];
 
-    const ext = pathString.includes(".")
-      ? pathString.substring(pathString.lastIndexOf("."))
-      : "";
-    const prefix = pathString.replace(/\*.*$/, "").replace(/\/$/, "");
-
-    const result = list.map((slug) => {
-      const filePath = prefix ? `${prefix}/${slug}${ext}` : `${slug}${ext}`;
-
-      // -- はディレクトリ階層を示す
-      return filePath.replace(/--/g, "/");
-    });
-
-    return result.sort();
+    return slugsToFilePaths(pathString, list);
   }
 
   async readFile(path: string): Promise<string> {
@@ -82,9 +70,9 @@ export class R2Provider implements StorageProvider {
     return object !== null;
   }
 
-  async delete(key: string) {
-    const fullKey = this.buildKey(key);
+  async removeFile(path: string): Promise<void> {
+    const fullKey = this.buildKey(path);
+
     await this.bucket.delete(fullKey);
-    return { success: true, key: fullKey };
   }
 }

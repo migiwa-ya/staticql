@@ -83,7 +83,34 @@ export class QueryBuilder<T> {
     indexedFilters = this.filters.filter((f) => indexableFields.has(f.field));
     fallbackFilters = this.filters.filter((f) => !indexableFields.has(f.field));
 
+    // fallbackFiltersが存在する場合は警告
+    if (fallbackFilters.length > 0) {
+      this.warnIndexFallback(
+        this.sourceName,
+        fallbackFilters,
+        "インデックス未使用（全スキャン）: fallbackFilters"
+      );
+    }
+
     return { indexedFilters, fallbackFilters };
+  }
+
+  /**
+   * インデックス未使用時の警告を出力する
+   * @param sourceName
+   * @param filters
+   * @param message
+   */
+  private warnIndexFallback(
+    sourceName: string,
+    filters: Filter[],
+    message?: string
+  ) {
+    console.warn(
+      `[staticql] ${message}: source=${sourceName}, filters=${JSON.stringify(
+        filters
+      )}`
+    );
   }
 
   /**
@@ -361,7 +388,12 @@ export class QueryBuilder<T> {
             }
 
             matched = JSON.parse(fileContent);
-          } catch {
+          } catch (e) {
+            this.warnIndexFallback(
+              sourceName,
+              [filter],
+              `インデックスファイルが見つかりません（全スキャン）: ${filePath}`
+            );
             matched = [];
           }
         } else if (op === "in" && Array.isArray(value)) {
@@ -384,7 +416,12 @@ export class QueryBuilder<T> {
               }
 
               matched.push(...JSON.parse(fileContent));
-            } catch {
+            } catch (e) {
+              this.warnIndexFallback(
+                sourceName,
+                [filter],
+                `インデックスファイルが見つかりません（全スキャン）: ${filePath}`
+              );
               // skip missing
             }
           }
@@ -415,7 +452,12 @@ export class QueryBuilder<T> {
                 }
 
                 matched.push(...JSON.parse(fileContent));
-              } catch {
+              } catch (e) {
+                this.warnIndexFallback(
+                  sourceName,
+                  [filter],
+                  `インデックスファイルが見つかりません（全スキャン）: ${file}`
+                );
                 // skip missing
               }
             }
@@ -438,6 +480,11 @@ export class QueryBuilder<T> {
 
           indexMap = JSON.parse(fileContent);
         } catch (e) {
+          this.warnIndexFallback(
+            sourceName,
+            [filter],
+            `インデックスファイルが見つかりません: ${filePath}`
+          );
           indexMap = null;
         }
 

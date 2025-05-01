@@ -47,4 +47,11 @@ export class StaticQL {
   getConfig() {
     return this.config;
   }
+
+  /**
+   * Indexerインスタンスを返す（インクリメンタルインデックス更新用）
+   */
+  getIndexer() {
+    return this.indexer;
+  }
 }

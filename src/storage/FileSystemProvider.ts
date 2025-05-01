@@ -1,7 +1,10 @@
 import { promises as fs } from "fs";
 import * as path from "path";
 import { StorageProvider } from "./StorageProvider";
-import { getSourceIndexFilePath } from "../utils/path.js";
+import {
+  getSourceIndexFilePath,
+  slugsToFilePaths,
+} from "../utils/path.js";
 
 /**
  * FileSystemProvider: ローカルファイルシステム用StorageProvider実装
@@ -40,6 +43,7 @@ export class FileSystemProvider implements StorageProvider {
     content: string | Uint8Array
   ): Promise<void> {
     const abs = path.resolve(this.baseDir, filePath);
+
     await fs.mkdir(path.dirname(abs), { recursive: true });
     await fs.writeFile(abs, content);
   }
@@ -69,14 +73,7 @@ export class FileSystemProvider implements StorageProvider {
     indexDir: string,
     pathString: string
   ): Promise<string[]> {
-    const abs = path.resolve(this.baseDir, pathString.replace(/\*.*$/, ""));
-    const ext = path.extname(pathString);
-    const result: string[] = [];
     const indexFilePath = getSourceIndexFilePath(indexDir, sourceName);
-
-    if ((await fs.stat(abs)).isFile()) {
-      return [abs];
-    }
 
     if (!(await this.exists(indexFilePath))) {
       return [];
@@ -85,15 +82,8 @@ export class FileSystemProvider implements StorageProvider {
     const raw = await this.readFile(indexFilePath);
     const fileContent =
       raw instanceof Uint8Array ? new TextDecoder().decode(raw) : raw;
-
-    const list = JSON.parse(fileContent);
-
-    for (const slug of list) {
-      const filePath = path.relative(this.baseDir, path.join(abs, slug)) + ext;
-
-      // -- はディレクトリ階層を示す
-      result.push(filePath.replace(/--/g, "/"));
-    }
+    const slugs = JSON.parse(fileContent);
+    const result = slugsToFilePaths(pathString, slugs);
 
     return result.sort();
   }
@@ -109,5 +99,15 @@ export class FileSystemProvider implements StorageProvider {
         yield path.relative(this.baseDir, full);
       }
     }
+  }
+
+  /**
+   * 指定ファイルを削除
+   * @param filePath - 相対パス
+   */
+  async removeFile(filePath: string): Promise<void> {
+    const abs = path.resolve(this.baseDir, filePath);
+
+    await fs.unlink(abs);
   }
 }
