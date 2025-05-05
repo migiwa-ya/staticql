@@ -1,5 +1,9 @@
 import { resolveField } from "./utils/field.js";
 import {
+  resolveDirectRelation,
+  resolveThroughRelation,
+} from "./utils/relationResolver.js";
+import {
   Relation,
   SourceConfigResolver as resolver,
   SourceRecord,
@@ -142,7 +146,7 @@ export class Indexer {
   /**
    * 1つのsourceについてインデックス用レコード配列を生成する
    * @param sourceName
-   * @returns Promise<any[]>
+   * @returns Promise<{ records, indexFields }>
    */
   private async buildIndexRecords(
     sourceName: string
@@ -168,69 +172,25 @@ export class Indexer {
       {}
     );
 
-    // ソースデータをマップ化（リレーション用）
-    const directMaps: Record<string, Map<string, any[]>> = {};
-    const throughToSourceMap: Record<string, Map<string, any[]>> = {};
-    const targetMaps: Record<string, Map<string, any>> = {};
-    for (const [key, rel] of Object.entries(relations)) {
-      if (this.isThroughRelation(rel)) {
-        const throughArr = dataMap[rel.through];
-        const targetArr = dataMap[rel.to];
-        const throughData = new Map<string, any[]>();
-        for (const t of throughArr) {
-          const keys = (resolveField(t, rel.throughForeignKey) ?? "")
-            .split(" ")
-            .filter(Boolean);
-          for (const k of keys) {
-            this.getOrCreateMapValue(throughData, k).push(t);
-          }
-        }
-        throughToSourceMap[key] = throughData;
-        const targetData = new Map<string, any>();
-        for (const t of targetArr) {
-          targetData.set(resolveField(t, rel.targetForeignKey) ?? "", t);
-        }
-        targetMaps[key] = targetData;
-      } else {
-        const arr = dataMap[rel.to];
-        const targetArr = new Map<string, any[]>();
-        for (const f of arr) {
-          const fk = resolveField(f, rel.foreignKey) ?? "";
-          for (const k of fk.split(" ").filter(Boolean)) {
-            this.getOrCreateMapValue(targetArr, k).push(f);
-          }
-        }
-        directMaps[key] = targetArr;
-      }
-    }
-
     // リレーションのアタッチ
     const attached = dataMap[sourceName].map((row) => {
       const data: any = { ...row };
       for (const [key, rel] of Object.entries(relations)) {
         if (this.isThroughRelation(rel)) {
-          const srcKey = resolveField(row, rel.sourceLocalKey) ?? "";
-          const throughRows = throughToSourceMap[key].get(srcKey) || [];
-          const targets = throughRows.flatMap((t) => {
-            return (resolveField(t, rel.throughLocalKey) ?? "")
-              .split(" ")
-              .map((k) => targetMaps[key].get(k))
-              .filter(Boolean);
-          });
-          data[key] =
-            rel.type === "hasOneThrough" ? targets[0] ?? null : targets;
+          // throughリレーション
+          data[key] = resolveThroughRelation(
+            row,
+            rel,
+            dataMap[rel.through],
+            dataMap[rel.to]
+          );
         } else {
-          const localVal = resolveField(row, rel.localKey) ?? "";
-          const keys = localVal.split(" ").filter(Boolean);
-          const matches = keys.flatMap((k) => directMaps[key].get(k) ?? []);
-          data[key] = rel.type === "hasOne" ? matches[0] ?? null : matches;
+          // directリレーション
+          data[key] = resolveDirectRelation(row, rel, dataMap[rel.to]);
         }
       }
-
       return data;
     });
-
-    // console.log(attached)
 
     // インデックス対象を抽出
     const indexFields = Array.from(
@@ -386,6 +346,7 @@ export class Indexer {
         ...(rsc.indexes?.split ?? {}),
       });
 
+      /* ---------- 更新処理 ---------- */
       const slugsToUpsert = [
         ...slugsToAdd,
         ...slugRenames.map((r) => r.newSlug),
@@ -400,6 +361,8 @@ export class Indexer {
         const fieldPath = rsc.indexes?.fields?.[field];
 
         if (splitPrefix) {
+          // 分割ファイルインデックス保存
+
           const keyMap: Record<string, Set<string>> = {};
           for (const rec of records) {
             const value = resolveField(rec, field);
@@ -413,20 +376,13 @@ export class Indexer {
 
           for (const [keyValue, slugSet] of Object.entries(keyMap)) {
             const path = `${splitPrefix}${keyValue}.json`;
-            await this.repository.writeFile(
-              path,
-              JSON.stringify([...slugSet], null, 2)
-            );
+            await this.repository.writeFile(path, JSON.stringify([...slugSet]));
           }
         } else if (fieldPath) {
-          let indexMap: Record<string, string[]> = {};
-          try {
-            const raw = await this.repository.readFile(fieldPath);
-            indexMap = JSON.parse(
-              typeof raw === "string" ? raw : new TextDecoder().decode(raw)
-            );
-          } catch {}
+          // 単一ファイルインデックス保存
 
+          let indexMap: Record<string, string[]> = {};
+          indexMap = JSON.parse(await this.repository.readFile(fieldPath));
           for (const rec of records) {
             const value = resolveField(rec, field);
             if (value == null) continue;
@@ -437,88 +393,64 @@ export class Indexer {
             }
           }
 
-          await this.repository.writeFile(
-            fieldPath,
-            JSON.stringify(indexMap, null, 2)
-          );
+          await this.repository.writeFile(fieldPath, JSON.stringify(indexMap));
         }
       }
 
+      /* ---------- 削除処理 ---------- */
       const slugsToRemove = [
         ...slugsToDel,
         ...slugRenames.map((r) => r.oldSlug),
       ];
+
       for (const field of indexFields) {
         const splitPrefix = rsc.indexes?.split?.[field];
         const fieldPath = rsc.indexes?.fields?.[field];
 
         if (splitPrefix) {
+          // 分割ファイルインデックス保存
+
           const indexDir = Indexer.getSplitIndexDir(sourceName, field);
           let files: string[] = [];
-          try {
-            files = await (this.repository as any).listFiles(indexDir);
-          } catch {}
-
+          files = await (this.repository as any).listFiles(indexDir);
           for (const file of files) {
             let slugs: string[] = [];
-            try {
-              const raw = await this.repository.readFile(file);
-              slugs = JSON.parse(
-                typeof raw === "string" ? raw : new TextDecoder().decode(raw)
-              );
-            } catch {
-              continue;
-            }
+            slugs = JSON.parse(await this.repository.readFile(file));
             const filtered = slugs.filter((s) => !slugsToRemove.includes(s));
+
             if (filtered.length === 0) {
               await this.repository.removeFile(file);
             } else if (filtered.length !== slugs.length) {
-              await this.repository.writeFile(
-                file,
-                JSON.stringify(filtered, null, 2)
-              );
+              await this.repository.writeFile(file, JSON.stringify(filtered));
             }
           }
         } else if (fieldPath) {
-          let indexMap: Record<string, string[]> = {};
-          try {
-            const raw = await this.repository.readFile(fieldPath);
-            indexMap = JSON.parse(
-              typeof raw === "string" ? raw : new TextDecoder().decode(raw)
-            );
-          } catch {}
+          // 単一ファイルインデックス保存
 
+          let indexMap: Record<string, string[]> = {};
+          indexMap = JSON.parse(await this.repository.readFile(fieldPath));
           for (const v of Object.keys(indexMap)) {
             indexMap[v] = indexMap[v].filter((s) => !slugsToRemove.includes(s));
             if (indexMap[v].length === 0) delete indexMap[v];
           }
 
-          await this.repository.writeFile(
-            fieldPath,
-            JSON.stringify(indexMap, null, 2)
-          );
+          await this.repository.writeFile(fieldPath, JSON.stringify(indexMap));
         }
       }
 
+      // slug インデックス
       const slugPath = rsc.indexes?.all;
       if (slugPath) {
         let slugList: string[] = [];
-        try {
-          const raw = await this.repository.readFile(slugPath);
-          slugList = JSON.parse(
-            typeof raw === "string" ? raw : new TextDecoder().decode(raw)
-          );
-        } catch {}
+        slugList = JSON.parse(await this.repository.readFile(slugPath));
 
         const newSlugs = [...slugsToAdd, ...slugRenames.map((r) => r.newSlug)];
         slugList = slugList.filter((s) => !slugsToRemove.includes(s));
         for (const s of newSlugs) {
           if (!slugList.includes(s)) slugList.push(s);
         }
-        await this.repository.writeFile(
-          slugPath,
-          JSON.stringify(slugList, null, 2)
-        );
+
+        await this.repository.writeFile(slugPath, JSON.stringify(slugList));
       }
     }
   }

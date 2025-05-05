@@ -7,9 +7,6 @@ import {
 } from "./SourceConfigResolver.js";
 
 export class SourceLoader<T> {
-  // FIXME: Cache にもレポジトリを使う
-  private cache: Map<string, T[]> = new Map();
-
   constructor(
     private repository: StorageRepository,
     private resolver: resolver,
