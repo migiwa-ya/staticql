@@ -1,29 +1,8 @@
 /**
- * 簡易Markdownパーサー: frontmatter（YAML）を抽出し、bodyとattributesを返す
- */
-export function parseMarkdown(input: string): {
-  body: string;
-  attributes: Record<string, any>;
-} {
-  const frontmatterMatch = input.match(/^---\s*\n([\s\S]*?)\n---\s*\n?/);
-  let attributes: Record<string, any> = {};
-  let body = input;
-
-  if (frontmatterMatch) {
-    const parsed = parseYAML(frontmatterMatch[1]);
-    // YAMLが配列の場合は最初の要素をattributesとする
-    attributes = Array.isArray(parsed) ? parsed[0] : parsed;
-    body = input.slice(frontmatterMatch[0].length);
-  }
-
-  return { attributes, body };
-}
-
-/**
  * インデントベースの簡易YAMLパーサー
  */
-export function parseYAML(input: string): any {
-  const lines = input.replace(/\r\n/g, "\n").split("\n");
+export function parseYAML({ rawContent }: { rawContent: string }): any {
+  const lines = rawContent.replace(/\r\n/g, "\n").split("\n");
   let idx = 0;
 
   // 先頭の空行・コメント行をスキップ

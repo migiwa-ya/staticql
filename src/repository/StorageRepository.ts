@@ -1,27 +1,18 @@
 /**
- * StorageProvider: データソース/出力先のI/O抽象インターフェース
- * - Cloudflare R2/S3/ローカルファイル対応
- * - Workers/Node両対応を想定
+ * StorageRepository: データソース/出力先のI/O抽象インターフェース
  */
-
-export interface StorageProvider {
+export interface StorageRepository {
   /**
    * 指定パスまたはその配下のファイル一覧を取得（ワイルドカード/プレフィックス対応）
-   * @param pattern 例: "herbs/*.md", "herbs/", "herbParts.yaml"
+   * @param pattern 例: "herbs/*.md", "report/", "herbParts.yaml"
    */
   listFiles(pattern: string): Promise<string[]>;
-
-  listFilesByIndex(
-    sourceName: string,
-    indexDir: string,
-    pattern: string
-  ): Promise<string[]>;
 
   /**
    * ファイルを読み込む
    * @param path
    */
-  readFile(path: string): Promise<Uint8Array | string>;
+  readFile(path: string): Promise<string>;
 
   /**
    * ファイルを書き込む

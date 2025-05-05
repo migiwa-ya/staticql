@@ -1,0 +1,154 @@
+{
+  "sources": {
+    "herbs": {
+      "pattern": "content/herbs/*.md",
+      "type": "markdown",
+      "schema": {
+        "type": "object",
+        "required": ["slug", "name"],
+        "properties": {
+          "slug": { "type": "string" },
+          "name": { "type": "string" },
+          "herbStateSlug": { "type": "string" },
+          "herbPartSlug": { "type": "string" }
+        }
+      },
+      "relations": {
+        "herbState": {
+          "to": "herbStates",
+          "localKey": "herbStateSlug",
+          "foreignKey": "slug",
+          "type": "hasOne"
+        },
+        "reports": {
+          "to": "reports",
+          "localKey": "slug",
+          "foreignKey": "combinedHerbs.slug",
+          "type": "belongsToMany"
+        }
+      },
+      "index": ["name", "herbState.name", "reports.reportGroupSlug", "tags"],
+      "splitIndexByKey": true
+    },
+
+    "herbStates": {
+      "type": "yaml",
+      "pattern": "content/herbStates.yaml",
+      "schema": {
+        "type": "object",
+        "required": ["slug", "name"],
+        "properties": {
+          "slug": { "type": "string" },
+          "name": { "type": "string" }
+        }
+      }
+    },
+
+    "reports": {
+      "pattern": "content/reports/**/*.md",
+      "type": "markdown",
+      "schema": {
+        "type": "object",
+        "required": [
+          "slug",
+          "reportGroupSlug",
+          "summary",
+          "processSlug",
+          "combinedHerbs"
+        ],
+        "properties": {
+          "slug": { "type": "string" },
+          "reportGroupSlug": { "type": "string" },
+          "summary": { "type": "string" },
+          "processSlug": { "type": "string" },
+          "combinedHerbs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "slug",
+                "herbStateSlug",
+                "herbPartSlug",
+                "description"
+              ],
+              "properties": {
+                "slug": { "type": "string" },
+                "herbStateSlug": { "type": "string" },
+                "herbPartSlug": { "type": "string" },
+                "description": { "type": "string" }
+              }
+            }
+          }
+        }
+      },
+      "relations": {
+        "herbs": {
+          "to": "herbs",
+          "localKey": "combinedHerbs.slug",
+          "foreignKey": "slug",
+          "type": "hasMany"
+        },
+        "reportGroup": {
+          "to": "reportGroups",
+          "localKey": "reportGroupSlug",
+          "foreignKey": "slug",
+          "type": "hasOne"
+        },
+        "processThroughReportGroup": {
+          "to": "processes",
+          "through": "reportGroups",
+          "sourceLocalKey": "reportGroupSlug",
+          "throughForeignKey": "slug",
+          "throughLocalKey": "processSlug",
+          "targetForeignKey": "slug",
+          "type": "hasOneThrough"
+        }
+      },
+      "index": [
+        "reportGroupSlug",
+        "processSlug",
+        "herbs.name",
+        "processThroughReportGroup.name"
+      ]
+    },
+
+    "reportGroups": {
+      "type": "yaml",
+      "pattern": "content/reportGroups.yaml",
+      "schema": {
+        "type": "object",
+        "required": ["slug", "processSlug", "combinedHerbs"],
+        "properties": {
+          "slug": { "type": "string" },
+          "processSlug": { "type": "string" },
+          "combinedHerbs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["slug", "herbStateSlug", "herbPartSlug"],
+              "properties": {
+                "slug": { "type": "string" },
+                "herbStateSlug": { "type": "string" },
+                "herbPartSlug": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "processes": {
+      "type": "yaml",
+      "pattern": "content/processes.yaml",
+      "schema": {
+        "type": "object",
+        "required": ["slug", "name", "description"],
+        "properties": {
+          "slug": { "type": "string" },
+          "name": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      }
+    }
+  }
+}

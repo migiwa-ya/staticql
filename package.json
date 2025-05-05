@@ -24,9 +24,9 @@
     }
   },
   "bin": {
-    "staticql-gen-index": "dist/cli/generate-index.js",
-    "staticql-gen-type": "dist/cli/generate-types.js",
-    "staticql-gen-schema": "dist/cli/generate-schema.js"
+    "staticql-gen-index": "./dist/cli/generate-index.js",
+    "staticql-gen-type": "./dist/cli/generate-types.js",
+    "staticql-gen-schema": "./dist/cli/generate-schema.js"
   },
   "files": [
     "dist",
@@ -59,12 +59,13 @@
   "license": "MIT",
   "description": "Type-safe query engine for Markdown/YAML/JSON-based static content.",
   "devDependencies": {
+    "@types/json-schema": "^7.0.15",
     "@types/node": "^22.14.0",
     "tsx": "^4.19.3",
     "typescript": "^5.8.3",
     "vitest": "^3.1.1"
   },
   "dependencies": {
-    "zod": "^3.24.2"
+    "json-schema": "^0.4.0"
   }
 }

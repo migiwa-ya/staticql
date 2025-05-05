@@ -1,24 +1,24 @@
-import { StaticQL } from "./StaticQL.js";
-import type { StaticQLConfig } from "./types.js";
-import type { StorageProvider } from "./storage/StorageProvider.js";
-import { R2Provider, R2Bucket } from "./storage/R2Provider.js";
+import { SourceConfigResolver } from "./SourceConfigResolver.js";
+import { StaticQL, StaticQLConfig, StaticQLInitOptions } from "./StaticQL.js";
+import { R2Bucket, R2Repository } from "./repository/R2Repository.js";
 
 /**
- * StaticQL インスタンスを生成するファクトリ関数(Cloudflare Workers用)
+ * StaticQL インスタンスを生成するファクトリ関数
  * @param config - StaticQLConfig 設定オブジェクト
  * @returns StaticQL ファクトリー
  */
 export function defineStaticQL(config: StaticQLConfig) {
-  return (bucket: R2Bucket) => {
-    if (config.storage.type !== "r2") {
-      throw Error("R2Provider needs `r2` storage type");
-    }
-
-    const provider: StorageProvider = new R2Provider(
-      bucket,
-      config.storage.output
-    );
-
-    return new StaticQL(config, provider);
+  return ({
+    bucket,
+    options = {},
+  }: {
+    bucket: R2Bucket;
+    options?: StaticQLInitOptions;
+  }) => {
+    const repository = new R2Repository(bucket);
+    const sourceConfigResolver = new SourceConfigResolver(config.sources);
+    return new StaticQL(config, repository, sourceConfigResolver, options);
   };
 }
+
+export type { Validator } from "./validator/Validator.js";

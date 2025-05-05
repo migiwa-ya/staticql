@@ -1,16 +1,11 @@
-import type { DataLoader } from "./DataLoader.js";
-import type { StaticQLConfig, SourceConfig } from "./types";
-import type { StorageProvider } from "./storage/StorageProvider";
-import { getAllFieldValues } from "./utils/field.js";
+import { getAllFieldValues, resolveField } from "./utils/field.js";
+import { SourceLoader } from "./SourceLoader";
+import { Indexer } from "./Indexer";
 import {
-  resolveDirectRelation,
-  resolveThroughRelation,
-} from "./utils/relation.js";
-import {
-  getFieldIndexFilePath,
-  getIndexDir,
-  getSplitIndexFilePath,
-} from "./utils/path.js";
+  ResolvedSourceConfig as rsc,
+  SourceConfigResolver as resolver,
+} from "./SourceConfigResolver";
+import { LoggerProvider } from "./logger/LoggerProvider";
 
 type Operator = "eq" | "contains" | "in";
 
@@ -19,23 +14,16 @@ type Filter =
   | { field: string; op: "in"; value: string[] };
 
 export class QueryBuilder<T> {
-  private sourceName: string;
-  private config: StaticQLConfig;
-  private loader: DataLoader<T>;
   private joins: string[] = [];
   private filters: Filter[] = [];
 
   constructor(
-    sourceName: string,
-    config: StaticQLConfig,
-    loader: DataLoader<T>,
-    joins: string[] = []
-  ) {
-    this.sourceName = sourceName;
-    this.config = config;
-    this.loader = loader;
-    this.joins = joins;
-  }
+    private sourceName: string,
+    private loader: SourceLoader<T>,
+    private indexer: Indexer,
+    private resolver: resolver,
+    private logger: LoggerProvider
+  ) {}
 
   /**
    * リレーション（join）を追加する
@@ -69,48 +57,31 @@ export class QueryBuilder<T> {
 
   /**
    * インデックスフィルタとフォールバックフィルタを抽出する
-   * @param sourceDef
+   * @param rsc
    * @returns { indexedFilters: Filter[], fallbackFilters: Filter[] }
    */
-  private extractIndexFilters(sourceDef: SourceConfig): {
+  private extractIndexFilters(rsc: rsc): {
     indexedFilters: Filter[];
     fallbackFilters: Filter[];
   } {
-    const indexableFields = new Set(["slug", ...(sourceDef.index ?? [])]);
+    const fieldIndexes = Object.keys(rsc.indexes?.fields ?? {});
+    const splitIndexes = Object.keys(rsc.indexes?.split ?? {});
+    const indexableFields = new Set(["slug", ...fieldIndexes, ...splitIndexes]);
     let indexedFilters: Filter[] = [];
     let fallbackFilters: Filter[] = [];
 
     indexedFilters = this.filters.filter((f) => indexableFields.has(f.field));
     fallbackFilters = this.filters.filter((f) => !indexableFields.has(f.field));
 
-    // fallbackFiltersが存在する場合は警告
     if (fallbackFilters.length > 0) {
-      this.warnIndexFallback(
+      this.logger.warn(
+        "インデックス未使用（全スキャン）",
         this.sourceName,
-        fallbackFilters,
-        "インデックス未使用（全スキャン）: fallbackFilters"
+        fallbackFilters
       );
     }
 
     return { indexedFilters, fallbackFilters };
-  }
-
-  /**
-   * インデックス未使用時の警告を出力する
-   * @param sourceName
-   * @param filters
-   * @param message
-   */
-  private warnIndexFallback(
-    sourceName: string,
-    filters: Filter[],
-    message?: string
-  ) {
-    console.warn(
-      `[staticql] ${message}: source=${sourceName}, filters=${JSON.stringify(
-        filters
-      )}`
-    );
   }
 
   /**
@@ -119,11 +90,10 @@ export class QueryBuilder<T> {
    * @throws 設定・データ不整合時に例外
    */
   async exec(): Promise<T[]> {
-    const sourceDef = this.config.sources[this.sourceName];
+    const rsc = this.resolver.resolveOne(this.sourceName);
 
     // インデックスフィルタとフォールバックフィルタを抽出
-    const { indexedFilters, fallbackFilters } =
-      this.extractIndexFilters(sourceDef);
+    const { indexedFilters, fallbackFilters } = this.extractIndexFilters(rsc);
 
     const requiresJoin =
       fallbackFilters.some((f) => f.field.includes(".")) ||
@@ -135,7 +105,7 @@ export class QueryBuilder<T> {
     matchedSlugs = await this.getMatchedSlugsFromIndexFilters(
       this.sourceName,
       indexedFilters,
-      sourceDef
+      rsc
     );
 
     if (matchedSlugs && matchedSlugs.length > 0) {
@@ -144,13 +114,14 @@ export class QueryBuilder<T> {
           this.loader.loadBySlug(this.sourceName, slug)
         )
       );
-    } else {
-      result = await this.loader.load(this.sourceName, true);
+    } else if (![...indexedFilters, ...fallbackFilters].length) {
+      // 検索条件なし
+      result = await this.loader.loadBySourceName(this.sourceName);
     }
 
     // join（リレーション）処理
     if (requiresJoin) {
-      result = await this.applyJoins(result, sourceDef);
+      result = await this.applyJoins(result, rsc);
     }
 
     // フィルタ適用（fallbackFilters）
@@ -162,12 +133,12 @@ export class QueryBuilder<T> {
   /**
    * join（リレーション）処理を適用する
    * @param result
-   * @param sourceDef
+   * @param sourceConfig
    * @returns Promise<T[]>
    */
-  private async applyJoins(result: T[], sourceDef: SourceConfig): Promise<T[]> {
+  private async applyJoins(result: T[], rsc: rsc): Promise<T[]> {
     for (const key of this.joins) {
-      const rel = sourceDef.relations?.[key];
+      const rel = rsc.relations?.[key];
       if (!rel) throw new Error(`Unknown relation: ${key}`);
 
       // Type guard for through relation
@@ -194,7 +165,7 @@ export class QueryBuilder<T> {
                     value: sourceSlugs,
                   },
                 ],
-                this.config.sources[rel.through]
+                this.resolver.resolveOne(rel.through)
               )) ?? []
             : Array.from(new Set(sourceSlugs));
 
@@ -213,7 +184,7 @@ export class QueryBuilder<T> {
             ? (await this.getMatchedSlugsFromIndexFilters(
                 rel.to,
                 [{ field: rel.targetForeignKey, op: "in", value: targetSlugs }],
-                this.config.sources[rel.through]
+                this.resolver.resolveOne(rel.through)
               )) ?? []
             : Array.from(new Set(targetSlugs));
 
@@ -223,7 +194,7 @@ export class QueryBuilder<T> {
         );
 
         result = result.map((row) => {
-          const relValue = resolveThroughRelation(
+          const relValue = this.resolveThroughRelation(
             row,
             rel,
             throughData,
@@ -257,7 +228,7 @@ export class QueryBuilder<T> {
             directRel.to,
             [{ field: directRel.foreignKey, op: "in", value: allLocalVals }],
             // directRel.localKey
-            this.config.sources[directRel.to]
+            this.resolver.resolveOne(directRel.to)
           );
           const uniqueSlugs = slugs ? Array.from(new Set(slugs)) : [];
           foreignData = await this.loader.loadBySlugs(
@@ -293,7 +264,11 @@ export class QueryBuilder<T> {
             return { ...row, [key]: related };
           } else {
             // hasOne/hasMany
-            const relValue = resolveDirectRelation(row, directRel, foreignData);
+            const relValue = this.resolveDirectRelation(
+              row,
+              directRel,
+              foreignData
+            );
             const relType = directRel.type;
 
             if (relType === "hasOne") {
@@ -345,169 +320,80 @@ export class QueryBuilder<T> {
   /**
    * インデックスフィルタから一致するslugリストを抽出する
    * @param indexedFilters
-   * @param sourceDef
+   * @param rsc
    * @returns string[] | null
    */
   private async getMatchedSlugsFromIndexFilters(
     sourceName: string,
     indexedFilters: Filter[],
-    sourceDef: SourceConfig
+    rsc: rsc
   ): Promise<string[] | null> {
-    const indexDir = this.config.storage.output;
-
     let indexSlugs: string[] | null = null;
 
     for (const filter of indexedFilters) {
       const { field, op, value } = filter;
-      const provider: StorageProvider = (this.loader as any).provider;
       let matched: string[] = [];
 
       if (field === "slug") {
         // slug 検索の場合はそのまま返す
+
         matched.push(String(value));
-      } else if (sourceDef.splitIndexByKey) {
+      } else if (Object.keys(rsc.indexes?.split ?? {}).length) {
         // 分割インデックスファイル方式
 
         if (op === "eq") {
           const keyValue = String(value);
-          const filePath = getSplitIndexFilePath(
-            indexDir,
-            sourceName,
-            field,
-            keyValue
-          );
-
-          try {
-            let raw = await provider.readFile(filePath);
-            let fileContent: string;
-
-            if (raw instanceof Uint8Array) {
-              fileContent = new TextDecoder().decode(raw);
-            } else {
-              fileContent = raw;
-            }
-
-            matched = JSON.parse(fileContent);
-          } catch (e) {
-            this.warnIndexFallback(
-              sourceName,
-              [filter],
-              `インデックスファイルが見つかりません（全スキャン）: ${filePath}`
-            );
-            matched = [];
-          }
+          matched =
+            (await this.indexer.getSplitIndex(sourceName, field, keyValue)) ??
+            [];
         } else if (op === "in" && Array.isArray(value)) {
           for (const keyValue of value) {
-            const filePath = getSplitIndexFilePath(
-              indexDir,
-              sourceName,
-              field,
-              keyValue
-            );
-
-            try {
-              let raw = await provider.readFile(filePath);
-              let fileContent: string;
-
-              if (raw instanceof Uint8Array) {
-                fileContent = new TextDecoder().decode(raw);
-              } else {
-                fileContent = raw;
-              }
-
-              matched.push(...JSON.parse(fileContent));
-            } catch (e) {
-              this.warnIndexFallback(
+            matched.push(
+              ...((await this.indexer.getSplitIndex(
                 sourceName,
-                [filter],
-                `インデックスファイルが見つかりません（全スキャン）: ${filePath}`
-              );
-              // skip missing
-            }
+                field,
+                keyValue
+              )) ?? [])
+            );
           }
         } else if (op === "contains") {
-          // containsの場合は全ファイルをリストアップして部分一致検索
-          let files: string[] = [];
-
-          try {
-            files = await provider.listFiles(
-              `${getIndexDir(indexDir)}/${sourceName}/index-${field}/`
-            );
-          } catch {
-            files = [];
-          }
-
-          for (const file of files) {
-            const key = file.replace(/^.*\//, "").replace(/\.json$/, "");
-
+          const indexPaths = await this.indexer.getSplitIndexPaths(
+            sourceName,
+            field
+          );
+          for (const path of indexPaths) {
+            const key = path.replace(/^.*\//, "").replace(/\.json$/, "");
             if (key.includes(String(value))) {
-              try {
-                let raw = await provider.readFile(file);
-                let fileContent: string;
-
-                if (raw instanceof Uint8Array) {
-                  fileContent = new TextDecoder().decode(raw);
-                } else {
-                  fileContent = raw;
-                }
-
-                matched.push(...JSON.parse(fileContent));
-              } catch (e) {
-                this.warnIndexFallback(
+              matched.push(
+                ...((await this.indexer.getSplitIndex(
                   sourceName,
-                  [filter],
-                  `インデックスファイルが見つかりません（全スキャン）: ${file}`
-                );
-                // skip missing
-              }
+                  field,
+                  key
+                )) ?? [])
+              );
             }
           }
         }
       } else {
         // 単一インデックスファイル方式
-        let indexMap: Record<string, string[]> | null = null;
-        const filePath = getFieldIndexFilePath(indexDir, sourceName, field);
 
-        try {
-          let raw = await provider.readFile(filePath);
-          let fileContent: string;
-
-          if (raw instanceof Uint8Array) {
-            fileContent = new TextDecoder().decode(raw);
-          } else {
-            fileContent = raw;
-          }
-
-          indexMap = JSON.parse(fileContent);
-        } catch (e) {
-          this.warnIndexFallback(
-            sourceName,
-            [filter],
-            `インデックスファイルが見つかりません: ${filePath}`
-          );
-          indexMap = null;
-        }
-
-        if (indexMap) {
-          if (op === "eq") {
-            const countMap: any = {};
-
-            for (const items of Object.values(indexMap)) {
-              for (const id of items) {
-                countMap[id] = (countMap[id] || 0) + 1;
-              }
-            }
-
-            matched = indexMap[String(value)].filter(
-              (id) => countMap[id] === 1
-            );
-          } else if (op === "contains") {
-            matched = Object.entries(indexMap)
-              .filter(([k]) => k.includes(String(value)))
-              .flatMap(([, slugs]) => slugs);
-          } else if (op === "in" && Array.isArray(value)) {
-            matched = value.flatMap((v) => indexMap![String(v)] ?? []);
-          }
+        if (op === "eq") {
+          matched =
+            (await this.indexer.getFieldIndex(
+              sourceName,
+              field,
+              String(value)
+            )) ?? [];
+        } else if (op === "in" && Array.isArray(value)) {
+          const indexMap =
+            (await this.indexer.getFieldIndexes(sourceName, field)) ?? {};
+          matched = value.flatMap((v) => indexMap![String(v)] ?? []);
+        } else if (op === "contains") {
+          const indexMap =
+            (await this.indexer.getFieldIndexes(sourceName, field)) ?? {};
+          matched = Object.entries(indexMap)
+            .filter(([k]) => k.includes(String(value)))
+            .flatMap(([, slugs]) => slugs);
         }
       }
 
@@ -516,12 +402,116 @@ export class QueryBuilder<T> {
         : matched;
     }
 
-    let matchedSlugs = indexSlugs;
-
-    if (!matchedSlugs || matchedSlugs.length === 0) {
+    if (!indexSlugs || indexSlugs.length === 0) {
       return null;
     }
 
-    return matchedSlugs;
+    return indexSlugs;
+  }
+  /**
+   * Mapのキー部分一致で値を抽出する
+   */
+  private findEntriesByPartialKey<K extends string | undefined, V>(
+    map: Map<K, V>,
+    keyword: string,
+    options?: { caseInsensitive?: boolean }
+  ): V[] {
+    const matchFn = options?.caseInsensitive
+      ? (k: string) => k.toLowerCase().includes(keyword.toLowerCase())
+      : (k: string) => k.includes(keyword);
+
+    return Array.from(map.entries())
+      .filter(([key]) => key && matchFn(key))
+      .map(([, value]) => value);
+  }
+
+  /**
+   * 配列データから指定パスの値ごとに親オブジェクト配列をMap化する
+   */
+  private buildForeignKeyMap(
+    data: any[],
+    foreignKeyPath: string
+  ): Map<string, any[]> {
+    const map = new Map<string, any[]>();
+    for (const obj of data) {
+      const values = getAllFieldValues(obj, foreignKeyPath);
+      for (const v of values) {
+        if (!map.has(v)) {
+          map.set(v, []);
+        }
+        map.get(v)!.push(obj);
+      }
+    }
+
+    return map;
+  }
+
+  /**
+   * 直接リレーション（hasOne/hasMany等）を解決し、関連オブジェクトを返す
+   */
+  private resolveDirectRelation(row: any, rel: any, foreignData: any[]): any {
+    const foreignMap = this.buildForeignKeyMap(foreignData, rel.foreignKey);
+    const relType = rel.type;
+    const localVal = (resolveField(row, rel.localKey) ?? "") as string;
+    const keys = localVal.split(" ").filter(Boolean);
+
+    // For each key, get all matching arrays of objects, flatten, and deduplicate
+    const matches = keys
+      .map((k: string) => this.findEntriesByPartialKey(foreignMap, k))
+      .flat()
+      .filter((v: any) => v);
+
+    if (relType === "hasOne") {
+      if (matches.length > 0 && Array.isArray(matches[0])) {
+        return matches.flat()[0];
+      }
+      return matches.length > 0 ? matches[0] : null;
+    } else if (relType === "hasMany") {
+      return matches.flat();
+    } else {
+      return matches.flat();
+    }
+  }
+
+  /**
+   * 中間テーブル（through）を介したリレーション（hasOneThrough/hasManyThrough等）を解決
+   */
+  private resolveThroughRelation(
+    row: any,
+    rel: any,
+    throughData: any[],
+    targetData: any[]
+  ): any {
+    const sourceKey = (resolveField(row, rel.sourceLocalKey) ?? "") as string;
+    const throughMatches = throughData.filter((t: any) =>
+      ((resolveField(t, rel.throughForeignKey) ?? "") as string)
+        .split(" ")
+        .includes(sourceKey)
+    );
+    const targetMap = new Map<string, any>(
+      targetData.map((r: any) => [
+        resolveField(r, rel.targetForeignKey) ?? "",
+        r,
+      ])
+    );
+    const targets = throughMatches
+      .map((t: any) => {
+        const throughKey = (resolveField(t, rel.throughLocalKey) ??
+          "") as string;
+        return throughKey
+          .split(" ")
+          .map((k: string) => targetMap.get(k))
+          .filter((v: any) => v);
+      })
+      .flat();
+
+    if (rel.type === "hasOneThrough") {
+      if (targets.length > 0 && Array.isArray(targets[0])) {
+        return targets[0];
+      }
+      return targets.length > 0 ? targets[0] : null;
+    } else {
+      return targets;
+    }
   }
 }

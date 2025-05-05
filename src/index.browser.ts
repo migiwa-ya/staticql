@@ -1,22 +1,24 @@
-import { StaticQL } from "./StaticQL.js";
-import type { StaticQLConfig } from "./types.js";
-import type { StorageProvider } from "./storage/StorageProvider.js";
-import { BrowserStorageProvider } from "./storage/BrowserStorageProvider.js";
+import { StaticQL, StaticQLConfig, StaticQLInitOptions } from "./StaticQL.js";
+import { FetchRepository } from "./repository/FetchRepository.js";
+import { SourceConfigResolver } from "./SourceConfigResolver.js";
 
 /**
- * StaticQL インスタンスを生成するファクトリ関数（ブラウザ用）
+ * StaticQL インスタンスを生成するファクトリ関数
  * @param config - StaticQLConfig 設定オブジェクト
  * @returns StaticQL ファクトリー
  */
 export function defineStaticQL(config: StaticQLConfig) {
-  return () => {
-    if (config.storage.type !== "browser") {
-      throw Error("BrowserStorageProvider needs `browser` storage type");
-    }
-
-    let provider: StorageProvider;
-    provider = new BrowserStorageProvider(config.storage?.baseUrl || "/", config);
-
-    return new StaticQL(config, provider);
+  return ({
+    baseDir = "./",
+    options = {},
+  }: {
+    baseDir?: string;
+    options?: StaticQLInitOptions;
+  } = {}) => {
+    const sourceConfigResolver = new SourceConfigResolver(config.sources);
+    const repository = new FetchRepository(baseDir, sourceConfigResolver);
+    return new StaticQL(config, repository, sourceConfigResolver, options);
   };
 }
+
+export type { Validator } from "./validator/Validator.js";

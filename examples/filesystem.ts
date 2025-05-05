@@ -1,4 +1,4 @@
-import define from "../tests/staticql.config.ts";
+import define from "../tests/staticql.config.ts.ack";
 import { HerbsRecord } from "../tests/types/staticql-types";
 
 async function main() {

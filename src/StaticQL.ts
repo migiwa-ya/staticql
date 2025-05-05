@@ -1,32 +1,66 @@
-import { DataLoader } from "./DataLoader.js";
+import { SourceLoader } from "./SourceLoader.js";
 import { Indexer } from "./Indexer.js";
-import type { StaticQLConfig, SourceRecord } from "./types.js";
 import { QueryBuilder } from "./QueryBuilder.js";
-import type { StorageProvider } from "./storage/StorageProvider.js";
+import {
+  SourceConfig,
+  SourceConfigResolver,
+  SourceRecord,
+} from "./SourceConfigResolver.js";
+import { StorageRepository } from "./repository/StorageRepository.js";
+import { Validator } from "./validator/Validator.js";
+import { defaultValidator } from "./validator/defaultValidator.js";
+import { ConsoleLogger } from "./logger/ConsoleLogger.js";
+import { LoggerProvider } from "./logger/LoggerProvider.js";
+
+export interface StaticQLInitOptions {
+  validator?: Validator;
+  logger?: LoggerProvider;
+}
+
+export interface StaticQLConfig {
+  sources: Record<string, SourceConfig>;
+}
 
 export class StaticQL {
-  private config: StaticQLConfig;
-  private loader: DataLoader<SourceRecord>;
-  private indexer: Indexer<SourceRecord>;
+  private validator: Validator;
+  private logger: LoggerProvider;
 
-  constructor(config: StaticQLConfig, provider: StorageProvider) {
-    this.config = config;
-    this.loader = new DataLoader<SourceRecord>(config, provider);
-    this.indexer = new Indexer<SourceRecord>(this.loader, config);
+  constructor(
+    private config: StaticQLConfig,
+    private repository: StorageRepository,
+    private sourceConfigResolver: SourceConfigResolver,
+    private options: StaticQLInitOptions = {}
+  ) {
+    this.validator = this.options.validator ?? defaultValidator;
+    this.logger = this.options.logger ?? new ConsoleLogger("info");
   }
 
   /**
    * 指定sourceの型安全なQueryBuilderを生成する
-   * @param source - source名
+   * @param sourceName - source名
    * @returns QueryBuilder<T>
    */
-  from<T extends SourceRecord>(source: string): QueryBuilder<T> {
-    const loader = new DataLoader<T>(
-      this.config,
-      (this.loader as any).provider
+  from<T extends SourceRecord>(sourceName: string): QueryBuilder<T> {
+    const sourceLoader = new SourceLoader<T>(
+      this.repository,
+      this.sourceConfigResolver,
+      this.validator
     );
 
-    return new QueryBuilder<T>(source, this.config, loader, []);
+    const indexer = new Indexer(
+      sourceLoader,
+      this.repository,
+      this.sourceConfigResolver,
+      this.logger
+    );
+
+    return new QueryBuilder<T>(
+      sourceName,
+      sourceLoader,
+      indexer,
+      this.sourceConfigResolver,
+      this.logger
+    );
   }
 
   /**
@@ -35,9 +69,7 @@ export class StaticQL {
    * @throws ストレージ書き込み失敗時に例外
    */
   async saveIndexes() {
-    const output = this.config.storage.output;
-
-    return this.indexer.saveTo(output);
+    this.getIndexer().save();
   }
 
   /**
@@ -52,6 +84,17 @@ export class StaticQL {
    * Indexerインスタンスを返す（インクリメンタルインデックス更新用）
    */
   getIndexer() {
-    return this.indexer;
+    const sourceLoader = new SourceLoader<SourceRecord>(
+      this.repository,
+      this.sourceConfigResolver,
+      this.validator
+    );
+
+    return new Indexer(
+      sourceLoader,
+      this.repository,
+      this.sourceConfigResolver,
+      this.logger
+    );
   }
 }

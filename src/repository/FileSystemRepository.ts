@@ -1,12 +1,11 @@
 import { promises as fs } from "fs";
 import * as path from "path";
-import { StorageProvider } from "./StorageProvider";
-import { getSourceIndexFilePath, slugsToFilePaths } from "../utils/path.js";
+import { StorageRepository } from "./StorageRepository";
 
 /**
  * FileSystemProvider: ローカルファイルシステム用StorageProvider実装
  */
-export class FileSystemProvider implements StorageProvider {
+export class FileSystemRepository implements StorageRepository {
   baseDir: string;
 
   constructor(baseDir: string = ".") {
@@ -29,10 +28,10 @@ export class FileSystemProvider implements StorageProvider {
     }
   }
 
-  async readFile(filePath: string): Promise<string | Uint8Array> {
+  async readFile(filePath: string): Promise<string> {
     const abs = path.resolve(this.baseDir, filePath);
 
-    return fs.readFile(abs);
+    return await fs.readFile(abs, "utf-8");
   }
 
   async writeFile(
@@ -62,32 +61,7 @@ export class FileSystemProvider implements StorageProvider {
       result.push(file);
     }
 
-    return result.sort();
-  }
-
-  async listFilesByIndex(
-    sourceName: string,
-    indexDir: string,
-    pathString: string
-  ): Promise<string[]> {
-    const indexFilePath = getSourceIndexFilePath(indexDir, sourceName);
-
-    if (!(await this.exists(indexFilePath))) {
-      return [];
-    }
-
-    // pathString がワイルドカードでない＝単一インデックスファイルのため、そのまま返す
-    if (!pathString.includes("*") && (await fs.stat(pathString)).isFile()) {
-      return [pathString];
-    }
-
-    const raw = await this.readFile(indexFilePath);
-    const fileContent =
-      raw instanceof Uint8Array ? new TextDecoder().decode(raw) : raw;
-    const slugs = JSON.parse(fileContent);
-    const result = slugsToFilePaths(pathString, slugs);
-
-    return result.sort();
+    return result;
   }
 
   async *walk(pathString: string): AsyncGenerator<string, void, unknown> {

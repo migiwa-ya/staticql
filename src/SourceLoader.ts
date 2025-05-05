@@ -1,60 +1,51 @@
-import type { StaticQLConfig, SourceConfig } from "./types";
-import type { StorageProvider } from "./storage/StorageProvider";
-import { parseMarkdown, parseYAML } from "./utils/parser.js";
-import { getSlugFromPath, slugsToFilePaths } from "./utils/path.js";
+import { Validator } from "./validator/Validator.js";
+import { parseByType } from "./parser/index.js";
+import type { StorageRepository } from "./repository/StorageRepository.js";
+import {
+  ResolvedSourceConfig as rsc,
+  SourceConfigResolver as resolver,
+} from "./SourceConfigResolver.js";
 
-export class DataLoader<T = unknown> {
-  private config: StaticQLConfig;
-  private provider: StorageProvider;
+export class SourceLoader<T> {
+  // FIXME: Cache にもレポジトリを使う
   private cache: Map<string, T[]> = new Map();
 
-  constructor(config: StaticQLConfig, provider: StorageProvider) {
-    this.config = config;
-    this.provider = provider;
-  }
+  constructor(
+    private repository: StorageRepository,
+    private resolver: resolver,
+    private validator: Validator
+  ) {}
 
-  /**
-   * 指定した sourceName の全データをストレージからロードし、型バリデーション・キャッシュする
-   * @param sourceName - 設定で定義された source 名
-   * @returns データ配列
-   * @throws 未知の source 名やスキーマ不一致時に例外
-   */
-  async load(sourceName: string, useIndex: boolean = false): Promise<T[]> {
-    if (this.cache.has(sourceName)) {
-      return this.cache.get(sourceName)!;
+  async loadBySourceName(sourceName: string): Promise<T[]> {
+    const rsc = this.resolver.resolveOne(sourceName);
+    const filePaths = await this.repository.listFiles(rsc.pattern);
+    const data: any = [];
+
+    for (const filePath of filePaths) {
+      data.push(await this.load(filePath, rsc));
     }
-
-    const source = this.config.sources[sourceName];
-    if (!source) throw new Error(`Unknown source: ${sourceName}`);
-
-    let files: string[];
-
-    if (useIndex) {
-      // デフォルト生成の slug インデックスファイルを参照
-      files = await this.provider.listFilesByIndex(
-        sourceName,
-        this.config.storage.output,
-        source.path
-      );
-    } else {
-      files = await this.provider.listFiles(source.path);
-    }
-
-    const parsed = await Promise.all(
-      files.map((f) => this.parseFile(f, source, f))
-    );
 
     const flattened =
-      Array.isArray(parsed) && Array.isArray(parsed[0])
-        ? parsed.flat()
-        : parsed;
+      Array.isArray(data) && Array.isArray(data[0]) ? data.flat() : data;
 
-    if (typeof source.schema?.parse === "function") {
-      source.schema.parse(flattened);
+    return flattened;
+  }
+
+  async load(filePath: string, rsc: rsc) {
+    const rawContent = await this.repository.readFile(filePath);
+    const parsed = await parseByType(rsc.type, { rawContent });
+    let validated = [];
+
+    if (Array.isArray(parsed)) {
+      parsed.map((p) => this.validator.validate(p, rsc.schema));
+      validated = parsed.flat();
+    } else {
+      parsed.slug = resolver.getSlugFromPath(rsc.pattern, filePath);
+      this.validator.validate(parsed, rsc.schema);
+      validated = parsed;
     }
-    this.cache.set(sourceName, flattened as T[]);
 
-    return flattened as T[];
+    return validated;
   }
 
   /**
@@ -66,33 +57,33 @@ export class DataLoader<T = unknown> {
    * @throws 未知の source 名やファイル未発見・スキーマ不一致時に例外
    */
   async loadBySlug(sourceName: string, slug: string): Promise<T> {
-    const source = this.config.sources[sourceName];
-    if (!source) throw new Error(`Unknown source: ${sourceName}`);
+    const rsc = this.resolver.resolveOne(sourceName);
+    if (!rsc) throw new Error(`Unknown source: ${sourceName}`);
 
     let filePath: string;
 
     // glob（*）を含む場合は共通関数でパス解決
-    if (source.path.includes("*")) {
-      filePath = slugsToFilePaths(source.path, [slug])[0];
+    if (rsc.pattern.includes("*")) {
+      filePath = resolver.getSourcePathsBySlugs(rsc.pattern, [slug])[0];
     } else {
-      // それ以外はsource.pathをそのまま使う
-      filePath = source.path;
+      // それ以外はrsc.pathをそのまま使う
+      filePath = rsc.pattern;
     }
 
     try {
-      const parsed = await this.parseFile(filePath, source, filePath);
+      const parsed = await this.parseFile(filePath, rsc, filePath);
+
       // 配列の場合はslug一致要素を返す
       if (Array.isArray(parsed)) {
         const found = parsed.find((item) => item && item.slug === slug);
         if (!found) throw new Error(`slug not found in file: ${filePath}`);
-        if (typeof source.schema?.parse === "function") {
-          source.schema.parse([found]);
-        }
+
+        this.validator.validate(found, rsc.schema);
+
         return found as T;
       } else {
-        if (typeof source.schema?.parse === "function") {
-          source.schema.parse([parsed]);
-        }
+        this.validator.validate(parsed, rsc.schema);
+
         return parsed as T;
       }
     } catch (err) {
@@ -129,35 +120,20 @@ export class DataLoader<T = unknown> {
    */
   private async parseFile(
     filePath: string,
-    source: SourceConfig,
+    rsc: rsc,
     fullPath: string
   ): Promise<T> {
     const ext = this.getExtname(fullPath);
-    let raw = await this.provider.readFile(fullPath);
-    if (raw instanceof Uint8Array) {
-      raw = new TextDecoder().decode(raw);
-    }
-
-    let parsed: unknown;
-
-    if (source.type === "markdown") {
-      const { attributes, body } = parseMarkdown(raw);
-      parsed = { ...attributes, content: body };
-    } else if (source.type === "yaml") {
-      parsed = parseYAML(raw);
-    } else if (source.type === "json") {
-      parsed = JSON.parse(raw);
-    } else {
-      throw new Error(`Unsupported file type: ${ext}`);
-    }
+    let raw = await this.repository.readFile(fullPath);
+    let parsed = await parseByType(rsc.type, { rawContent: raw });
 
     if (
-      source.path.includes("*") &&
+      rsc.pattern.includes("*") &&
       !Array.isArray(parsed) &&
       typeof parsed === "object" &&
       parsed !== null
     ) {
-      const slugFromPath = getSlugFromPath(source.path, filePath);
+      const slugFromPath = resolver.getSlugFromPath(rsc.pattern, filePath);
 
       // 型ガード: parsedはRecord<string, unknown>型として扱う
       const parsedObj = parsed as Record<string, unknown>;

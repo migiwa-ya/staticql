@@ -1,7 +1,6 @@
-import { StaticQL } from "./StaticQL.js";
-import type { StaticQLConfig } from "./types.js";
-import type { StorageProvider } from "./storage/StorageProvider.js";
-import { FileSystemProvider } from "./storage/FileSystemProvider.js";
+import { SourceConfigResolver } from "./SourceConfigResolver.js";
+import { StaticQL, StaticQLConfig, StaticQLInitOptions } from "./StaticQL.js";
+import { FileSystemRepository } from "./repository/FileSystemRepository.js";
 
 /**
  * StaticQL インスタンスを生成するファクトリ関数
@@ -9,14 +8,14 @@ import { FileSystemProvider } from "./storage/FileSystemProvider.js";
  * @returns StaticQL ファクトリー
  */
 export function defineStaticQL(config: StaticQLConfig) {
-  return () => {
-    if (config.storage.type !== "filesystem") {
-      throw Error("FileSystemProvider needs `r2` storage type");
-    }
-
-    let provider: StorageProvider;
-    provider = new FileSystemProvider(config.storage?.baseDir);
-
-    return new StaticQL(config, provider);
+  return ({
+    baseDir = "./",
+    options = {},
+  }: { baseDir?: string; options?: StaticQLInitOptions } = {}) => {
+    const repository = new FileSystemRepository(baseDir);
+    const sourceConfigResolver = new SourceConfigResolver(config.sources);
+    return new StaticQL(config, repository, sourceConfigResolver, options);
   };
 }
+
+export type { Validator } from "./validator/Validator.js";

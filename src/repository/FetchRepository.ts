@@ -1,18 +1,15 @@
-import { StaticQLConfig } from "../types";
-import type { StorageProvider } from "./StorageProvider";
-import { slugsToFilePaths } from "../utils/path.js";
+import { SourceConfigResolver as resolver } from "../SourceConfigResolver";
+import type { StorageRepository } from "./StorageRepository";
 
 /**
  * ブラウザ用 StorageProvider: public/ 配下のファイルを fetch で読み込む
  * - 書き込み・ファイル一覧取得は未サポート
  */
-export class BrowserStorageProvider implements StorageProvider {
+export class FetchRepository implements StorageRepository {
   baseUrl: string;
-  schema: StaticQLConfig;
 
-  constructor(baseUrl: string = "/", schema: StaticQLConfig) {
+  constructor(baseUrl: string = "/", private resolver: resolver) {
     this.baseUrl = baseUrl.replace(/\/+$/, "") + "/";
-    this.schema = schema;
   }
 
   async readFile(path: string): Promise<string> {
@@ -33,35 +30,16 @@ export class BrowserStorageProvider implements StorageProvider {
     // sourceName を pattern から推定
     const m = pattern.match(/^([^\/\.\*]+)/);
     const sourceName = m ? m[1] : null;
-    if (!sourceName || !this.schema.sources[sourceName]) return [];
-    // listFilesByIndexにバイパス
-    return this.listFilesByIndex(sourceName, "", pattern);
-  }
-
-  async listFilesByIndex(
-    sourceName: string,
-    indexDir: string,
-    pattern: string
-  ): Promise<string[]> {
-    if (!this.schema.sources[sourceName]) return [];
+    const rsc = this.resolver.resolveOne(sourceName ?? "");
+    if (!rsc) return [];
 
     // indexes.all は slug の配列
-    const slugs: string[] = this.schema.sources[sourceName]?.indexes?.all
-      ? await this._fetchIndexFile(this.schema.sources[sourceName].indexes.all)
+    const slugs: string[] = rsc.indexes?.all
+      ? await this.fetchIndexFile(rsc.indexes.all)
       : [];
 
     // 共通関数でslugフィルタ・パス生成
-    return slugsToFilePaths(pattern, slugs);
-  }
-
-  async _fetchIndexFile(indexPath: string): Promise<string[]> {
-    // indexPath は public/ からの相対パス or 絶対パス
-    const url = indexPath.startsWith("/")
-      ? this.baseUrl + indexPath.replace(/^\/+/, "")
-      : this.baseUrl + indexPath;
-    const res = await fetch(url);
-    if (!res.ok) return [];
-    return await res.json();
+    return resolver.getSourcePathsBySlugs(pattern, slugs);
   }
 
   async writeFile(path: string, data: Uint8Array | string): Promise<void> {
@@ -70,5 +48,15 @@ export class BrowserStorageProvider implements StorageProvider {
 
   async removeFile(path: string): Promise<void> {
     throw new Error("removeFile is not supported in browser environment");
+  }
+
+  private async fetchIndexFile(indexPath: string): Promise<string[]> {
+    // indexPath は public/ からの相対パス or 絶対パス
+    const url = indexPath.startsWith("/")
+      ? this.baseUrl + indexPath.replace(/^\/+/, "")
+      : this.baseUrl + indexPath;
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    return await res.json();
   }
 }

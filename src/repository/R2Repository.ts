@@ -1,5 +1,4 @@
-import { getSourceIndexFilePath, slugsToFilePaths } from "../utils/path.js";
-import { StorageProvider } from "./StorageProvider";
+import { StorageRepository } from "./StorageRepository.js";
 
 export interface R2Bucket {
   put(key: string, value: string | ArrayBuffer | ReadableStream): Promise<void>;
@@ -18,7 +17,7 @@ export interface R2Objects {
   objects: { key: string }[];
 }
 
-export class R2Provider implements StorageProvider {
+export class R2Repository implements StorageRepository {
   constructor(private bucket: R2Bucket, private prefix?: string) {}
 
   private buildKey(key: string) {
@@ -30,23 +29,6 @@ export class R2Provider implements StorageProvider {
     const list = await this.bucket.list({ prefix: path });
 
     return list.objects.map((obj) => obj.key).sort();
-  }
-
-  async listFilesByIndex(
-    sourceName: string,
-    indexDir: string,
-    pathString: string
-  ): Promise<string[]> {
-    const indexFilePath = getSourceIndexFilePath(indexDir, sourceName);
-
-    if (!(await this.exists(indexFilePath))) {
-      return [];
-    }
-
-    const fileContent = await this.readFile(indexFilePath);
-    const list = JSON.parse(fileContent) as string[];
-
-    return slugsToFilePaths(pathString, list);
   }
 
   async readFile(path: string): Promise<string> {
