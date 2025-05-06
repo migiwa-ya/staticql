@@ -7,8 +7,8 @@ import { StaticQL, StaticQLConfig } from "../src/StaticQL.js";
 import { DiffEntry, Indexer } from "../src/Indexer.js";
 
 async function run() {
-  const { config, outputPath, isIncremental, diffFilePath } = await getArgs();
-  const staticql: StaticQL = init(config, outputPath, isIncremental);
+  const { config, outputDir, isIncremental, diffFilePath } = await getArgs();
+  const staticql: StaticQL = init(config, outputDir, isIncremental);
 
   if (isIncremental && diffFilePath) {
     await increment(staticql, diffFilePath);
@@ -21,23 +21,19 @@ run();
 
 function getArgs() {
   const args = process.argv.slice(2);
-  let [configPath, outputPath] = args;
+  let [configPath, outputDir] = args;
   const isIncremental = args.includes("--incremental");
   const diffFilePathArg = args.find((a) => a.startsWith("--diff-file="));
   const diffFilePath = diffFilePathArg ? diffFilePathArg.split("=")[1] : null;
 
-  if (!configPath) {
-    console.error("Error: 引数 'input' が必要です。");
+  if (!configPath || !outputDir) {
+    console.error(
+      "Error: Expected at least 2 arguments: <config_file> <output_dir>"
+    );
     process.exit(1);
   }
 
-  if (
-    !configPath.startsWith("/") &&
-    typeof process !== "undefined" &&
-    process.cwd
-  ) {
-    configPath = process.cwd() + "/" + configPath;
-  }
+  configPath = path.resolve(process.cwd(), configPath);
 
   if (isIncremental && !diffFilePath) {
     console.error(
@@ -49,20 +45,20 @@ function getArgs() {
   const raw = readFileSync(configPath, "utf-8");
   const config = JSON.parse(raw);
 
-  return { config, outputPath, isIncremental, diffFilePath };
+  return { config, outputDir, isIncremental, diffFilePath };
 }
 
 function init(
   config: StaticQLConfig,
-  outputPath: string,
+  outputDir: string,
   isIncremental: boolean
 ) {
   try {
-    const staticql = defineStaticQL(config)({ baseDir: outputPath });
+    const staticql = defineStaticQL(config)({ baseDir: outputDir });
 
     // 出力前にインデックスディレクトリを削除（インクリメンタル時は削除しない）
     if (!isIncremental) {
-      const indexDir = path.resolve(outputPath, Indexer.indexPrefix);
+      const indexDir = path.resolve(outputDir, Indexer.indexPrefix);
 
       if (existsSync(indexDir)) {
         rmSync(indexDir, { recursive: true, force: true });
