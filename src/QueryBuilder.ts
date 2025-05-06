@@ -1,7 +1,7 @@
 import { getAllFieldValues } from "./utils/field.js";
 import {
   resolveDirectRelation,
-  resolveThroughRelation
+  resolveThroughRelation,
 } from "./utils/relationResolver.js";
 import { SourceLoader } from "./SourceLoader";
 import { Indexer } from "./Indexer";
@@ -60,35 +60,6 @@ export class QueryBuilder<T> {
   }
 
   /**
-   * インデックスフィルタとフォールバックフィルタを抽出する
-   * @param rsc
-   * @returns { indexedFilters: Filter[], fallbackFilters: Filter[] }
-   */
-  private extractIndexFilters(rsc: rsc): {
-    indexedFilters: Filter[];
-    fallbackFilters: Filter[];
-  } {
-    const fieldIndexes = Object.keys(rsc.indexes?.fields ?? {});
-    const splitIndexes = Object.keys(rsc.indexes?.split ?? {});
-    const indexableFields = new Set(["slug", ...fieldIndexes, ...splitIndexes]);
-    let indexedFilters: Filter[] = [];
-    let fallbackFilters: Filter[] = [];
-
-    indexedFilters = this.filters.filter((f) => indexableFields.has(f.field));
-    fallbackFilters = this.filters.filter((f) => !indexableFields.has(f.field));
-
-    if (fallbackFilters.length > 0) {
-      this.logger.warn(
-        "インデックス未使用（全スキャン）",
-        this.sourceName,
-        fallbackFilters
-      );
-    }
-
-    return { indexedFilters, fallbackFilters };
-  }
-
-  /**
    * クエリを実行し、条件に合致したデータ配列を返す
    * @returns クエリ結果のデータ配列
    * @throws 設定・データ不整合時に例外
@@ -132,6 +103,35 @@ export class QueryBuilder<T> {
     result = this.applyFallbackFilters(result, fallbackFilters);
 
     return result;
+  }
+
+  /**
+   * インデックスフィルタとフォールバックフィルタを抽出する
+   * @param rsc
+   * @returns { indexedFilters: Filter[], fallbackFilters: Filter[] }
+   */
+  private extractIndexFilters(rsc: rsc): {
+    indexedFilters: Filter[];
+    fallbackFilters: Filter[];
+  } {
+    const fieldIndexes = Object.keys(rsc.indexes?.fields ?? {});
+    const splitIndexes = Object.keys(rsc.indexes?.split ?? {});
+    const indexableFields = new Set(["slug", ...fieldIndexes, ...splitIndexes]);
+    let indexedFilters: Filter[] = [];
+    let fallbackFilters: Filter[] = [];
+
+    indexedFilters = this.filters.filter((f) => indexableFields.has(f.field));
+    fallbackFilters = this.filters.filter((f) => !indexableFields.has(f.field));
+
+    if (fallbackFilters.length > 0) {
+      this.logger.warn(
+        "インデックス未使用（全スキャン）",
+        this.sourceName,
+        fallbackFilters
+      );
+    }
+
+    return { indexedFilters, fallbackFilters };
   }
 
   /**
@@ -268,11 +268,7 @@ export class QueryBuilder<T> {
             return { ...row, [key]: related };
           } else {
             // hasOne/hasMany
-            const relValue = resolveDirectRelation(
-              row,
-              directRel,
-              foreignData
-            );
+            const relValue = resolveDirectRelation(row, directRel, foreignData);
             const relType = directRel.type;
 
             if (relType === "hasOne") {

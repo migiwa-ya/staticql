@@ -35,213 +35,6 @@ export class Indexer {
     private readonly logger: LoggerProvider
   ) {}
 
-  async getSplitIndexes(sourceName: string, field: string) {
-    const indexDir = Indexer.getSplitIndexDir(sourceName, field);
-    const indexPaths = await this.repository.listFiles(indexDir);
-    let indexMap: Record<string, string[]> = {};
-
-    for (const path of indexPaths) {
-      const key = path.replace(/^.*\//, "").replace(/\.json$/, "");
-      const raw = await this.repository.readFile(path);
-      indexMap[key] = JSON.parse(raw);
-    }
-
-    return Object.values(indexMap).length === 0 ? null : indexMap;
-  }
-
-  async getSplitIndexPaths(sourceName: string, field: string) {
-    const indexDir = Indexer.getSplitIndexDir(sourceName, field);
-    const indexPaths = await this.repository.listFiles(indexDir);
-
-    return indexPaths;
-  }
-
-  async getSplitIndex(sourceName: string, field: string, key: string) {
-    const path = Indexer.getSplitIndexFilePath(sourceName, field, key);
-    let matched: string[] | null;
-
-    try {
-      const raw = await this.repository.readFile(path);
-      matched = JSON.parse(raw);
-    } catch (e) {
-      this.logger.info(`インデックスファイルが見つかりません`, {
-        sourceName,
-        path,
-      });
-      matched = null;
-    }
-
-    return matched;
-  }
-
-  async getFieldIndexes(sourceName: string, field: string) {
-    let indexMap: Record<string, string[]> | null = null;
-    const path = Indexer.getFieldIndexFilePath(sourceName, field);
-
-    try {
-      const raw = await this.repository.readFile(path);
-      indexMap = JSON.parse(raw);
-    } catch (e) {
-      this.logger.info(`インデックスファイルが見つかりません`, {
-        sourceName,
-        path,
-      });
-      indexMap = null;
-    }
-
-    return indexMap;
-  }
-
-  async getFieldIndex(sourceName: string, field: string, key: string) {
-    const indexes = await this.getFieldIndexes(sourceName, field);
-    if (!indexes) return null;
-
-    for (const [keyValue, index] of Object.entries(indexes)) {
-      if (keyValue === key) return index;
-    }
-
-    this.logger.info(`インデックスファイルが見つかりません`, {
-      sourceName,
-      field,
-    });
-
-    return null;
-  }
-
-  async getSlugIndexes(sourceName: string) {
-    const path = Indexer.getSlugIndexFilePath(sourceName);
-    let indexes: string[] | null = null;
-
-    try {
-      const raw = await this.repository.readFile(path);
-      indexes = JSON.parse(raw);
-    } catch (e) {
-      this.logger.info(`インデックスファイルが見つかりません`, {
-        sourceName,
-      });
-      indexes = null;
-    }
-
-    return indexes;
-  }
-
-  /**
-   * 全sourceについてインデックス用レコード配列を生成 AsyncGenerator で返す
-   * @returns AsyncGenerator<{ sourceName, records, indexFields }>
-   */
-  async *build(): AsyncGenerator<{
-    sourceName: string;
-    records: any[];
-    indexFields: string[];
-  }> {
-    const sourceCnofigs = this.resolver.resolveAll();
-
-    for (const { name } of sourceCnofigs) {
-      const { records, indexFields } = await this.buildIndexRecords(name);
-
-      yield { sourceName: name, records, indexFields };
-    }
-  }
-
-  /**
-   * 1つのsourceについてインデックス用レコード配列を生成する
-   * @param sourceName
-   * @returns Promise<{ records, indexFields }>
-   */
-  private async buildIndexRecords(
-    sourceName: string
-  ): Promise<{ records: any[]; indexFields: string[] }> {
-    const rsc = this.resolver.resolveOne(sourceName);
-    const relations = rsc.relations ?? {};
-
-    // 対象ソースとリレーションソースをロード
-    const loadKeys = new Set<string>([sourceName]);
-    for (const rel of Object.values(relations)) {
-      if (this.isThroughRelation(rel)) {
-        loadKeys.add(rel.through);
-        loadKeys.add(rel.to);
-      } else {
-        loadKeys.add(rel.to);
-      }
-    }
-    const loadedArrays = await Promise.all(
-      Array.from(loadKeys).map((k) => this.sourceLoader.loadBySourceName(k))
-    );
-    const dataMap = Array.from(loadKeys).reduce<Record<string, any[]>>(
-      (acc, k, i) => ((acc[k] = loadedArrays[i]), acc),
-      {}
-    );
-
-    // リレーションのアタッチ
-    const attached = dataMap[sourceName].map((row) => {
-      const data: any = { ...row };
-      for (const [key, rel] of Object.entries(relations)) {
-        if (this.isThroughRelation(rel)) {
-          // throughリレーション
-          data[key] = resolveThroughRelation(
-            row,
-            rel,
-            dataMap[rel.through],
-            dataMap[rel.to]
-          );
-        } else {
-          // directリレーション
-          data[key] = resolveDirectRelation(row, rel, dataMap[rel.to]);
-        }
-      }
-      return data;
-    });
-
-    // インデックス対象を抽出
-    const indexFields = Array.from(
-      new Set([
-        ...Object.keys(rsc.indexes?.fields ?? {}),
-        ...Object.keys(rsc.indexes?.split ?? {}),
-      ])
-    );
-
-    const records = attached.map((row) => {
-      const values: Record<string, string> = {};
-      for (const fld of indexFields) {
-        const v = resolveField(row, fld);
-        if (v != null && String(v) !== "") values[fld] = String(v);
-      }
-      return { slug: row.slug, values };
-    });
-
-    return { records, indexFields };
-  }
-
-  /**
-   * リレーションが through か判定
-   * @param rel
-   * @returns
-   */
-  private isThroughRelation(rel: Relation): rel is ThroughRelation {
-    return (
-      typeof rel === "object" &&
-      "through" in rel &&
-      (rel.type === "hasOneThrough" || rel.type === "hasManyThrough")
-    );
-  }
-
-  /**
-   * 未設定マップキーをセット
-   * @param map
-   * @param key
-   * @returns
-   */
-  private getOrCreateMapValue<K, V>(map: Map<K, V[]>, key: K): V[] {
-    let value = map.get(key);
-
-    if (!value) {
-      value = [];
-      map.set(key, value);
-    }
-
-    return value;
-  }
-
   /**
    * 全sourceのインデックス/メタファイルを指定ディレクトリに出力する
    * @returns void
@@ -453,6 +246,196 @@ export class Indexer {
         await this.repository.writeFile(slugPath, JSON.stringify(slugList));
       }
     }
+  }
+
+  async getSplitIndexes(sourceName: string, field: string) {
+    const indexDir = Indexer.getSplitIndexDir(sourceName, field);
+    const indexPaths = await this.repository.listFiles(indexDir);
+    let indexMap: Record<string, string[]> = {};
+
+    for (const path of indexPaths) {
+      const key = path.replace(/^.*\//, "").replace(/\.json$/, "");
+      const raw = await this.repository.readFile(path);
+      indexMap[key] = JSON.parse(raw);
+    }
+
+    return Object.values(indexMap).length === 0 ? null : indexMap;
+  }
+
+  async getSplitIndexPaths(sourceName: string, field: string) {
+    const indexDir = Indexer.getSplitIndexDir(sourceName, field);
+    const indexPaths = await this.repository.listFiles(indexDir);
+
+    return indexPaths;
+  }
+
+  async getSplitIndex(sourceName: string, field: string, key: string) {
+    const path = Indexer.getSplitIndexFilePath(sourceName, field, key);
+    let matched: string[] | null;
+
+    try {
+      const raw = await this.repository.readFile(path);
+      matched = JSON.parse(raw);
+    } catch (e) {
+      this.logger.info(`インデックスファイルが見つかりません`, {
+        sourceName,
+        path,
+      });
+      matched = null;
+    }
+
+    return matched;
+  }
+
+  async getFieldIndexes(sourceName: string, field: string) {
+    let indexMap: Record<string, string[]> | null = null;
+    const path = Indexer.getFieldIndexFilePath(sourceName, field);
+
+    try {
+      const raw = await this.repository.readFile(path);
+      indexMap = JSON.parse(raw);
+    } catch (e) {
+      this.logger.info(`インデックスファイルが見つかりません`, {
+        sourceName,
+        path,
+      });
+      indexMap = null;
+    }
+
+    return indexMap;
+  }
+
+  async getFieldIndex(sourceName: string, field: string, key: string) {
+    const indexes = await this.getFieldIndexes(sourceName, field);
+    if (!indexes) return null;
+
+    for (const [keyValue, index] of Object.entries(indexes)) {
+      if (keyValue === key) return index;
+    }
+
+    this.logger.info(`インデックスファイルが見つかりません`, {
+      sourceName,
+      field,
+    });
+
+    return null;
+  }
+
+  async getSlugIndexes(sourceName: string) {
+    const path = Indexer.getSlugIndexFilePath(sourceName);
+    let indexes: string[] | null = null;
+
+    try {
+      const raw = await this.repository.readFile(path);
+      indexes = JSON.parse(raw);
+    } catch (e) {
+      this.logger.info(`インデックスファイルが見つかりません`, {
+        sourceName,
+      });
+      indexes = null;
+    }
+
+    return indexes;
+  }
+
+  /**
+   * 全sourceについてインデックス用レコード配列を生成 AsyncGenerator で返す
+   * @returns AsyncGenerator<{ sourceName, records, indexFields }>
+   */
+  private async *build(): AsyncGenerator<{
+    sourceName: string;
+    records: any[];
+    indexFields: string[];
+  }> {
+    const sourceCnofigs = this.resolver.resolveAll();
+
+    for (const { name } of sourceCnofigs) {
+      const { records, indexFields } = await this.buildIndexRecords(name);
+
+      yield { sourceName: name, records, indexFields };
+    }
+  }
+
+  /**
+   * 1つのsourceについてインデックス用レコード配列を生成する
+   * @param sourceName
+   * @returns Promise<{ records, indexFields }>
+   */
+  private async buildIndexRecords(
+    sourceName: string
+  ): Promise<{ records: any[]; indexFields: string[] }> {
+    const rsc = this.resolver.resolveOne(sourceName);
+    const relations = rsc.relations ?? {};
+
+    // 対象ソースとリレーションソースをロード
+    const loadKeys = new Set<string>([sourceName]);
+    for (const rel of Object.values(relations)) {
+      if (this.isThroughRelation(rel)) {
+        loadKeys.add(rel.through);
+        loadKeys.add(rel.to);
+      } else {
+        loadKeys.add(rel.to);
+      }
+    }
+    const loadedArrays = await Promise.all(
+      Array.from(loadKeys).map((k) => this.sourceLoader.loadBySourceName(k))
+    );
+    const dataMap = Array.from(loadKeys).reduce<Record<string, any[]>>(
+      (acc, k, i) => ((acc[k] = loadedArrays[i]), acc),
+      {}
+    );
+
+    // リレーションのアタッチ
+    const attached = dataMap[sourceName].map((row) => {
+      const data: any = { ...row };
+      for (const [key, rel] of Object.entries(relations)) {
+        if (this.isThroughRelation(rel)) {
+          // throughリレーション
+          data[key] = resolveThroughRelation(
+            row,
+            rel,
+            dataMap[rel.through],
+            dataMap[rel.to]
+          );
+        } else {
+          // directリレーション
+          data[key] = resolveDirectRelation(row, rel, dataMap[rel.to]);
+        }
+      }
+      return data;
+    });
+
+    // インデックス対象を抽出
+    const indexFields = Array.from(
+      new Set([
+        ...Object.keys(rsc.indexes?.fields ?? {}),
+        ...Object.keys(rsc.indexes?.split ?? {}),
+      ])
+    );
+
+    const records = attached.map((row) => {
+      const values: Record<string, string> = {};
+      for (const fld of indexFields) {
+        const v = resolveField(row, fld);
+        if (v != null && String(v) !== "") values[fld] = String(v);
+      }
+      return { slug: row.slug, values };
+    });
+
+    return { records, indexFields };
+  }
+
+  /**
+   * リレーションが through か判定
+   * @param rel
+   * @returns
+   */
+  private isThroughRelation(rel: Relation): rel is ThroughRelation {
+    return (
+      typeof rel === "object" &&
+      "through" in rel &&
+      (rel.type === "hasOneThrough" || rel.type === "hasManyThrough")
+    );
   }
 
   /**
