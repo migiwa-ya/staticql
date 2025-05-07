@@ -106,8 +106,10 @@ export class SourceConfigResolver {
     const relationalSources = Object.entries(this.sources)
       .filter(([name]) => name !== sourceName)
       .map(([_, source]) =>
-        Object.entries(source.relations ?? {}).find(
-          ([_, rel]) => rel.to === sourceName
+        Object.entries(source.relations ?? {}).find(([_, rel]) =>
+          this.isThroughRelation(rel)
+            ? rel.to === sourceName || rel.through === sourceName
+            : rel.to === sourceName
         )
       )
       .filter(Boolean)
@@ -124,10 +126,16 @@ export class SourceConfigResolver {
           rel.type === "hasOneThrough" ||
           rel.type === "hasManyThrough"
         ) {
-          field =
-            rel.targetForeignKey === "slug"
-              ? null
-              : `${rel.targetForeignKey}.slug`;
+          if (rel.to === sourceName) {
+            field =
+              rel.targetForeignKey === "slug"
+                ? null
+                : `${rel.targetForeignKey}`;
+          } else {
+            // rel.to === 'through'
+            field =
+              rel.throughLocalKey === "slug" ? null : `${rel.throughLocalKey}`;
+          }
         }
 
         if (!field) continue;
@@ -155,6 +163,14 @@ export class SourceConfigResolver {
     this.cache[sourceName] = result;
 
     return result;
+  }
+
+  isThroughRelation(rel: Relation): rel is ThroughRelation {
+    return (
+      typeof rel === "object" &&
+      "through" in rel &&
+      (rel.type === "hasOneThrough" || rel.type === "hasManyThrough")
+    );
   }
 
   static getSourcePathsBySlugs(pattern: string, slugs: string[]): string[] {
