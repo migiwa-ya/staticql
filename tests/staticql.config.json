@@ -5,35 +5,55 @@
       "type": "markdown",
       "schema": {
         "type": "object",
-        "required": ["slug", "name"],
+        "required": ["name", "tagSlugs", "overview"],
         "properties": {
-          "slug": { "type": "string" },
           "name": { "type": "string" },
-          "herbStateSlug": { "type": "string" },
-          "herbPartSlug": { "type": "string" }
+          "compoundSlugs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tagSlugs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "overview": { "type": "string" },
+          "efficacy": { "type": "string" }
         }
       },
       "relations": {
-        "herbState": {
-          "to": "herbStates",
-          "localKey": "herbStateSlug",
+        "compounds": {
+          "to": "compounds",
+          "localKey": "compoundSlugs",
           "foreignKey": "slug",
-          "type": "hasOne"
+          "type": "hasMany"
         },
-        "reports": {
-          "to": "reports",
-          "localKey": "slug",
-          "foreignKey": "combinedHerbs.slug",
-          "type": "belongsToMany"
+        "tags": {
+          "to": "tags",
+          "localKey": "tagSlugs",
+          "foreignKey": "slug",
+          "type": "hasMany"
+        },
+        "recipes": {
+          "to": "recipes",
+          "through": "recipeGroups",
+          "sourceLocalKey": "slug",
+          "throughForeignKey": "combinedHerbs.slug",
+          "throughLocalKey": "slug",
+          "targetForeignKey": "recipeGroupSlug",
+          "type": "hasManyThrough"
         }
       },
-      "index": ["name", "herbState.name", "reports.reportGroupSlug", "tags"],
+      "index": ["name", "compoundSlugs", "tagSlugs", "recipes.recipeGroupSlug"],
       "splitIndexByKey": true
     },
 
-    "herbStates": {
+    "tags": {
       "type": "yaml",
-      "pattern": "content/herbStates.yaml",
+      "pattern": "content/tags.yaml",
       "schema": {
         "type": "object",
         "required": ["slug", "name"],
@@ -44,39 +64,33 @@
       }
     },
 
-    "reports": {
-      "pattern": "content/reports/**/*.md",
+    "compounds": {
+      "type": "yaml",
+      "pattern": "content/compounds.yaml",
+      "schema": {
+        "type": "object",
+        "required": ["slug", "name"],
+        "properties": {
+          "slug": { "type": "string" },
+          "name": { "type": "string" }
+        }
+      }
+    },
+
+    "recipes": {
+      "pattern": "content/recipes/**/*.md",
       "type": "markdown",
       "schema": {
         "type": "object",
-        "required": [
-          "slug",
-          "reportGroupSlug",
-          "summary",
-          "processSlug",
-          "combinedHerbs"
-        ],
+        "required": ["recipeGroupSlug", "recipe"],
         "properties": {
-          "slug": { "type": "string" },
-          "reportGroupSlug": { "type": "string" },
+          "recipeGroupSlug": { "type": "string" },
           "summary": { "type": "string" },
           "processSlug": { "type": "string" },
-          "combinedHerbs": {
+          "recipe": {
             "type": "array",
             "items": {
-              "type": "object",
-              "required": [
-                "slug",
-                "herbStateSlug",
-                "herbPartSlug",
-                "description"
-              ],
-              "properties": {
-                "slug": { "type": "string" },
-                "herbStateSlug": { "type": "string" },
-                "herbPartSlug": { "type": "string" },
-                "description": { "type": "string" }
-              }
+              "type": "string"
             }
           }
         }
@@ -84,37 +98,29 @@
       "relations": {
         "herbs": {
           "to": "herbs",
-          "localKey": "combinedHerbs.slug",
-          "foreignKey": "slug",
-          "type": "hasMany"
+          "through": "recipeGroups",
+          "sourceLocalKey": "recipeGroupSlug",
+          "throughForeignKey": "slug",
+          "throughLocalKey": "combinedHerbs.slug",
+          "targetForeignKey": "slug",
+          "type": "hasManyThrough"
         },
-        "reportGroup": {
-          "to": "reportGroups",
-          "localKey": "reportGroupSlug",
-          "foreignKey": "slug",
-          "type": "hasOne"
-        },
-        "processThroughReportGroup": {
+        "process": {
           "to": "processes",
-          "through": "reportGroups",
-          "sourceLocalKey": "reportGroupSlug",
+          "through": "recipeGroups",
+          "sourceLocalKey": "recipeGroupSlug",
           "throughForeignKey": "slug",
           "throughLocalKey": "processSlug",
           "targetForeignKey": "slug",
           "type": "hasOneThrough"
         }
       },
-      "index": [
-        "reportGroupSlug",
-        "processSlug",
-        "herbs.name",
-        "processThroughReportGroup.name"
-      ]
+      "index": ["herbs.slug"]
     },
 
-    "reportGroups": {
+    "recipeGroups": {
       "type": "yaml",
-      "pattern": "content/reportGroups.yaml",
+      "pattern": "content/recipeGroups.yaml",
       "schema": {
         "type": "object",
         "required": ["slug", "processSlug", "combinedHerbs"],
@@ -137,16 +143,41 @@
       }
     },
 
+    "herbParts": {
+      "type": "yaml",
+      "pattern": "content/processes.yaml",
+      "schema": {
+        "type": "object",
+        "required": ["slug", "name"],
+        "properties": {
+          "slug": { "type": "string" },
+          "name": { "type": "string" }
+        }
+      }
+    },
+
+    "herbStates": {
+      "type": "yaml",
+      "pattern": "content/herbStates.yaml",
+      "schema": {
+        "type": "object",
+        "required": ["slug", "name"],
+        "properties": {
+          "slug": { "type": "string" },
+          "name": { "type": "string" }
+        }
+      }
+    },
+
     "processes": {
       "type": "yaml",
       "pattern": "content/processes.yaml",
       "schema": {
         "type": "object",
-        "required": ["slug", "name", "description"],
+        "required": ["slug", "name"],
         "properties": {
           "slug": { "type": "string" },
-          "name": { "type": "string" },
-          "description": { "type": "string" }
+          "name": { "type": "string" }
         }
       }
     }

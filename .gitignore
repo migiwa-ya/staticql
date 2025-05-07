@@ -3,11 +3,6 @@ dist/
 .cache/
 .npm/
 
-tests/output/
-tests/types/
-tests/content-test/
-tests/public/
-
 .DS_Store
 .vscode/
 .idea/
@@ -15,3 +10,7 @@ tests/public/
 
 /docs
 .clinerules
+
+# tests
+/tests/staticql-types.d.ts
+/tests/index

@@ -8,8 +8,65 @@ import { Indexer } from "./Indexer";
 import {
   ResolvedSourceConfig as rsc,
   SourceConfigResolver as resolver,
+  SourceRecord,
 } from "./SourceConfigResolver";
 import { LoggerProvider } from "./logger/LoggerProvider";
+
+// join 可能なフィールド名
+type JoinableKeys<T> = {
+  [K in keyof T]: NonNullable<T[K]> extends SourceRecord | SourceRecord[]
+    ? `${Extract<K, string>}`
+    : never;
+}[keyof T];
+
+// where 可能なフィールド名（オリジナルのフィールド）
+type SourceFields<T> = {
+  [K in keyof T]: NonNullable<T[K]> extends SourceRecord | SourceRecord[]
+    ? never
+    : NonNullable<T[K]> extends (infer U)[]
+    ? U extends object
+      ? NestedKeys<U, Extract<K, string>>
+      : K
+    : NonNullable<T[K]> extends object
+    ? NestedKeys<NonNullable<T[K]>, Extract<K, string>>
+    : K;
+}[keyof T];
+
+// ネストループの制限カウント
+type Prev = [never, 0, 1, 2, 3, 4, 5];
+
+// ネストのドット結合によるフィールド名を再帰的に抽出
+type NestedKeys<T, Prefix extends string = "", Depth extends number = 3> = [
+  Depth
+] extends [never]
+  ? never
+  : T extends object
+  ? {
+      [K in keyof T]: NonNullable<T[K]> extends object
+        ? NestedKeys<
+            NonNullable<T[K]>,
+            `${Prefix}${Prefix extends "" ? "" : "."}${Extract<K, string>}`,
+            Prev[Depth]
+          >
+        : `${Prefix}${Prefix extends "" ? "" : "."}${Extract<K, string>}`;
+    }[keyof T]
+  : never;
+
+// where 可能なフィールド名（リレーション先のフィールド）
+type RelationalFields<T> = {
+  [K in keyof T]: NonNullable<T[K]> extends SourceRecord | SourceRecord[]
+    ? NonNullable<T[K]> extends (infer U)[]
+      ? U extends object
+        ? NestedKeys<U, Extract<K, string>>
+        : never
+      : NonNullable<T[K]> extends object
+      ? NestedKeys<NonNullable<T[K]>, Extract<K, string>>
+      : never
+    : K;
+}[keyof T];
+
+// where 可能なフィールド名
+type Fields<T> = RelationalFields<T> | SourceFields<T>;
 
 type Operator = "eq" | "contains" | "in";
 
@@ -34,9 +91,8 @@ export class QueryBuilder<T> {
    * @param relationKey - 設定で定義されたリレーション名
    * @returns this（メソッドチェーン可）
    */
-  join(relationKey: string): QueryBuilder<T> {
-    this.joins = [...this.joins, relationKey];
-
+  join<K extends JoinableKeys<T>>(relationKey: K): QueryBuilder<T> {
+    this.joins = [...this.joins, relationKey as string];
     return this;
   }
 
@@ -47,10 +103,14 @@ export class QueryBuilder<T> {
    * @param value - 比較値
    * @returns this（メソッドチェーン可）
    */
-  where(field: string, op: "eq" | "contains", value: string): QueryBuilder<T>;
-  where(field: string, op: "in", value: string[]): QueryBuilder<T>;
   where(
-    field: string,
+    field: Fields<T>,
+    op: "eq" | "contains",
+    value: string
+  ): QueryBuilder<T>;
+  where(field: Fields<T>, op: "in", value: string[]): QueryBuilder<T>;
+  where(
+    field: Fields<T>,
     op: Operator,
     value: string | string[]
   ): QueryBuilder<T> {
@@ -89,7 +149,7 @@ export class QueryBuilder<T> {
           this.loader.loadBySlug(this.sourceName, slug)
         )
       );
-    } else if (![...indexedFilters, ...fallbackFilters].length) {
+    } else if (fallbackFilters.length) {
       // 検索条件なし
       result = await this.loader.loadBySourceName(this.sourceName);
     }

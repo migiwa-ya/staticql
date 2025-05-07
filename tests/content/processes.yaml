@@ -1,0 +1,17 @@
+- slug: infusion
+  name: ハーブティー
+
+- slug: tincture
+  name: チンキ
+
+- slug: decoction
+  name: 煎じ薬
+
+- slug: salve
+  name: 軟膏
+
+- slug: distillation
+  name: 蒸留
+
+- slug: powder
+  name: 粉末
