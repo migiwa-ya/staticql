@@ -152,6 +152,8 @@ export class QueryBuilder<T> {
     } else if (fallbackFilters.length) {
       // 検索条件なし
       result = await this.loader.loadBySourceName(this.sourceName);
+    } else {
+      result = await this.loader.loadBySourceName(this.sourceName);
     }
 
     // join（リレーション）処理

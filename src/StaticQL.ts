@@ -69,7 +69,7 @@ export class StaticQL {
    * @throws ストレージ書き込み失敗時に例外
    */
   async saveIndexes() {
-    this.getIndexer().save();
+    await this.getIndexer().save();
   }
 
   /**
