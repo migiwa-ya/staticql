@@ -102,13 +102,9 @@ npx staticql-gen-index ./staticql.config.json ./public/index/ --incremental --di
 
 ```json
 [
-  // 追加
   { "status": "A", "path": "content/foo.md" },
-  // 変更
   { "status": "M", "path": "content/bar.md" },
-  // 削除
   { "status": "D", "path": "content/baz.md" },
-  // リネーム
   { "status": "R", "path": "content/new.md", "oldPath": "content/old.md" }
 ]
 ```
@@ -156,7 +152,7 @@ herbPartSlug: leaf
 
 ### 定義ファイル（抜粋）
 
-```json
+```jsonc
 // ./staticql.config.json
 
 {
