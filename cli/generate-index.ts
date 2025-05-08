@@ -2,7 +2,8 @@
 
 import path from "path";
 import { existsSync, rmSync, readFileSync } from "fs";
-import { defineStaticQL, FileSystemRepository } from "../src/index.js";
+import { defineStaticQL } from "../src/index.js";
+import { FsRepository } from "../src/repository/FsRepository.js";
 import { StaticQL, StaticQLConfig } from "../src/StaticQL.js";
 import { DiffEntry, Indexer } from "../src/Indexer.js";
 import { ConsoleLogger } from "../src/logger/ConsoleLogger.js";
@@ -58,7 +59,7 @@ function init(
 ) {
   try {
     const staticql = defineStaticQL(config)({
-      repository: new FileSystemRepository(outputDir),
+      repository: new FsRepository(outputDir),
     });
 
     // 出力前にインデックスディレクトリを削除（インクリメンタル時は削除しない）

@@ -23,4 +23,3 @@ export function defineStaticQL(config: StaticQLConfig) {
 
 export type { StaticQLConfig } from "./StaticQL.js";
 export type { Validator } from "./validator/Validator.js";
-export * from "./repository";

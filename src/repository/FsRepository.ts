@@ -3,9 +3,9 @@ import * as path from "path";
 import { StorageRepository } from "./StorageRepository";
 
 /**
- * FileSystemProvider: ローカルファイルシステム用StorageProvider実装
+ * FSProvider: ローカルファイルシステム用StorageProvider実装
  */
-export class FileSystemRepository implements StorageRepository {
+export class FsRepository implements StorageRepository {
   baseDir: string;
 
   constructor(baseDir: string = ".") {

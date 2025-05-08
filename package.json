@@ -1,6 +1,6 @@
 {
   "name": "@migiwa-ya/staticql",
-  "version": "0.19.0",
+  "version": "0.19.1",
   "type": "module",
   "main": "dist/src/index.js",
   "types": "./dist/src/index.d.ts",
@@ -8,6 +8,18 @@
     ".": {
       "import": "./dist/src/index.js",
       "types": "./dist/src/index.d.ts"
+    },
+    "./repo/fs": {
+      "node": "./dist/src/repository/FsRepository.js",
+      "default": "./dist/src/repository/FsRepository.js"
+    },
+    "./repo/workers-r2": {
+      "workerd": "./dist/src/repository/R2Repository.js",
+      "default": "./dist/src/repository/R2Repository.js"
+    },
+    "./repo/fetch": {
+      "import": "./dist/src/repository/FetchRepository.js",
+      "default": "./dist/src/repository/FetchRepository.js"
     },
     "./types": {
       "types": "./dist/src/types.d.ts"

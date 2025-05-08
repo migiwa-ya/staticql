@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeAll } from "vitest";
-import { defineStaticQL, FileSystemRepository } from "../src/index";
+import { defineStaticQL } from "../src/index";
+import { FsRepository } from "../src/repository/FsRepository";
 import staticqlConfig from "./staticql.config.json";
 import { StaticQLConfig } from "../src/StaticQL";
 import { HerbsRecord, RecipesRecord } from "./staticql-types";
 
 const config = staticqlConfig as StaticQLConfig;
 const staticql = defineStaticQL(config)({
-  repository: new FileSystemRepository("tests/"),
+  repository: new FsRepository("tests/"),
 });
 
 beforeAll(async () => {
