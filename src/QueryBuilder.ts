@@ -6,20 +6,20 @@ import {
 import { SourceLoader } from "./SourceLoader";
 import { Indexer } from "./Indexer";
 import {
-  ResolvedSourceConfig as rsc,
-  SourceConfigResolver as resolver,
+  ResolvedSourceConfig as RSC,
+  SourceConfigResolver as Resolver,
   SourceRecord,
 } from "./SourceConfigResolver";
 import { LoggerProvider } from "./logger/LoggerProvider";
 
-// join 可能なフィールド名
+// Extract joinable fields (those referencing SourceRecord or SourceRecord[])
 type JoinableKeys<T> = {
   [K in keyof T]: NonNullable<T[K]> extends SourceRecord | SourceRecord[]
     ? `${Extract<K, string>}`
     : never;
 }[keyof T];
 
-// where 可能なフィールド名（オリジナルのフィールド）
+// Extract queryable fields (excluding relations)
 type SourceFields<T> = {
   [K in keyof T]: NonNullable<T[K]> extends SourceRecord | SourceRecord[]
     ? never
@@ -32,10 +32,10 @@ type SourceFields<T> = {
     : K;
 }[keyof T];
 
-// ネストループの制限カウント
+// Nest traversal depth limiter
 type Prev = [never, 0, 1, 2, 3, 4, 5];
 
-// ネストのドット結合によるフィールド名を再帰的に抽出
+// Recursively extract dot-notated nested keys
 type NestedKeys<T, Prefix extends string = "", Depth extends number = 3> = [
   Depth
 ] extends [never]
@@ -52,7 +52,7 @@ type NestedKeys<T, Prefix extends string = "", Depth extends number = 3> = [
     }[keyof T]
   : never;
 
-// where 可能なフィールド名（リレーション先のフィールド）
+// Extract fields from relational records
 type RelationalFields<T> = {
   [K in keyof T]: NonNullable<T[K]> extends SourceRecord | SourceRecord[]
     ? NonNullable<T[K]> extends (infer U)[]
@@ -65,7 +65,7 @@ type RelationalFields<T> = {
     : K;
 }[keyof T];
 
-// where 可能なフィールド名
+// All queryable fields
 type Fields<T> = RelationalFields<T> | SourceFields<T>;
 
 type Operator = "eq" | "contains" | "in";
@@ -74,6 +74,9 @@ type Filter =
   | { field: string; op: "eq" | "contains"; value: string }
   | { field: string; op: "in"; value: string[] };
 
+/**
+ * QueryBuilder allows for type-safe querying and joining of static structured data.
+ */
 export class QueryBuilder<T> {
   private joins: string[] = [];
   private filters: Filter[] = [];
@@ -82,14 +85,15 @@ export class QueryBuilder<T> {
     private sourceName: string,
     private loader: SourceLoader<T>,
     private indexer: Indexer,
-    private resolver: resolver,
+    private resolver: Resolver,
     private logger: LoggerProvider
   ) {}
 
   /**
-   * リレーション（join）を追加する
-   * @param relationKey - 設定で定義されたリレーション名
-   * @returns this（メソッドチェーン可）
+   * Adds a relation to join with.
+   *
+   * @param relationKey - Name of the relation as defined in the config.
+   * @returns This instance (chainable).
    */
   join<K extends JoinableKeys<T>>(relationKey: K): QueryBuilder<T> {
     this.joins = [...this.joins, relationKey as string];
@@ -97,11 +101,12 @@ export class QueryBuilder<T> {
   }
 
   /**
-   * フィールド・演算子・値でフィルタ条件を追加する
-   * @param field - フィルタ対象フィールド名
-   * @param op - 演算子（"eq"|"contains"|"in"）
-   * @param value - 比較値
-   * @returns this（メソッドチェーン可）
+   * Adds a filter condition.
+   *
+   * @param field - Field to filter by.
+   * @param op - Operator: "eq" | "contains" | "in".
+   * @param value - Value or values to compare.
+   * @returns This instance (chainable).
    */
   where(
     field: Fields<T>,
@@ -115,79 +120,66 @@ export class QueryBuilder<T> {
     value: string | string[]
   ): QueryBuilder<T> {
     this.filters.push({ field, op, value } as Filter);
-
     return this;
   }
 
   /**
-   * クエリを実行し、条件に合致したデータ配列を返す
-   * @returns クエリ結果のデータ配列
-   * @throws 設定・データ不整合時に例外
+   * Executes the query and returns matching records.
+   *
+   * @returns Matched data records.
    */
   async exec(): Promise<T[]> {
     const rsc = this.resolver.resolveOne(this.sourceName);
-
-    // インデックスフィルタとフォールバックフィルタを抽出
     const { indexedFilters, fallbackFilters } = this.extractIndexFilters(rsc);
 
     const requiresJoin =
       fallbackFilters.some((f) => f.field.includes(".")) ||
       this.joins.length > 0;
 
-    let result: T[] = [];
-    let matchedSlugs: string[] | null = null;
-
-    matchedSlugs = await this.getMatchedSlugsFromIndexFilters(
+    let matchedSlugs = await this.getMatchedSlugsFromIndexFilters(
       this.sourceName,
       indexedFilters,
       rsc
     );
 
-    if (matchedSlugs && matchedSlugs.length > 0) {
-      result = await Promise.all(
-        matchedSlugs.map((slug) =>
-          this.loader.loadBySlug(this.sourceName, slug)
-        )
-      );
-    } else if (fallbackFilters.length) {
-      // 検索条件なし
-      result = await this.loader.loadBySourceName(this.sourceName);
-    } else {
-      result = await this.loader.loadBySourceName(this.sourceName);
-    }
+    let result: T[] =
+      matchedSlugs && matchedSlugs.length > 0
+        ? await Promise.all(
+            matchedSlugs.map((slug) =>
+              this.loader.loadBySlug(this.sourceName, slug)
+            )
+          )
+        : await this.loader.loadBySourceName(this.sourceName);
 
-    // join（リレーション）処理
     if (requiresJoin) {
       result = await this.applyJoins(result, rsc);
     }
 
-    // フィルタ適用（fallbackFilters）
     result = this.applyFallbackFilters(result, fallbackFilters);
-
     return result;
   }
 
   /**
-   * インデックスフィルタとフォールバックフィルタを抽出する
-   * @param rsc
-   * @returns { indexedFilters: Filter[], fallbackFilters: Filter[] }
+   * Categorizes filters into index-usable and fallback (in-memory) filters.
    */
-  private extractIndexFilters(rsc: rsc): {
+  private extractIndexFilters(rsc: RSC): {
     indexedFilters: Filter[];
     fallbackFilters: Filter[];
   } {
     const fieldIndexes = Object.keys(rsc.indexes?.fields ?? {});
     const splitIndexes = Object.keys(rsc.indexes?.split ?? {});
     const indexableFields = new Set(["slug", ...fieldIndexes, ...splitIndexes]);
-    let indexedFilters: Filter[] = [];
-    let fallbackFilters: Filter[] = [];
 
-    indexedFilters = this.filters.filter((f) => indexableFields.has(f.field));
-    fallbackFilters = this.filters.filter((f) => !indexableFields.has(f.field));
+    const indexedFilters = this.filters.filter((f) =>
+      indexableFields.has(f.field)
+    );
+    const fallbackFilters = this.filters.filter(
+      (f) => !indexableFields.has(f.field)
+    );
 
     if (fallbackFilters.length > 0) {
       this.logger.warn(
-        "インデックス未使用（全スキャン）",
+        "Fallback filter triggered (full scan)",
         this.sourceName,
         fallbackFilters
       );
@@ -197,29 +189,25 @@ export class QueryBuilder<T> {
   }
 
   /**
-   * join（リレーション）処理を適用する
-   * @param result
-   * @param sourceConfig
-   * @returns Promise<T[]>
+   * Applies configured joins (relations) to the result set.
    */
-  private async applyJoins(result: T[], rsc: rsc): Promise<T[]> {
+  private async applyJoins(result: T[], rsc: RSC): Promise<T[]> {
     for (const key of this.joins) {
       const rel = rsc.relations?.[key];
       if (!rel) throw new Error(`Unknown relation: ${key}`);
 
-      // Type guard for through relation
+      // Check if the relation is a "through" relation
       const isThrough =
         rel.type === "hasOneThrough" || rel.type === "hasManyThrough";
 
       if (isThrough) {
-        // Through relation (hasOneThrough, hasManyThrough)
+        // For "hasOneThrough" and "hasManyThrough" relations
 
         const sourceSlugs = result.flatMap((row) =>
           getAllFieldValues(row, rel.sourceLocalKey)
         );
 
-        // 中間テーブルが slug でない ≒ loadBySlugs が効かない
-        // その場合インデックスファイルから slug を取得する
+        // If the intermediate table doesn't use "slug", index-based lookup is required
         const uniqueSourceSlugs =
           rel.throughForeignKey !== "slug"
             ? (await this.getMatchedSlugsFromIndexFilters(
@@ -239,12 +227,12 @@ export class QueryBuilder<T> {
           rel.through,
           uniqueSourceSlugs
         );
+
         const targetSlugs = throughData.flatMap((t) =>
           getAllFieldValues(t, rel.throughLocalKey)
         );
 
-        // 対象テーブルが slug でない ≒ loadBySlugs が効かない
-        // その場合インデックスファイルから slug を取得する
+        // If the target table doesn't use "slug", index-based lookup is required
         const uniqueTargetSlugs =
           rel.targetForeignKey !== "slug"
             ? (await this.getMatchedSlugsFromIndexFilters(
@@ -267,42 +255,43 @@ export class QueryBuilder<T> {
             targetData
           );
 
-          if (rel.type === "hasOneThrough") {
-            return { ...row, [key]: relValue ?? null };
-          } else {
-            // hasManyThrough
-            return { ...row, [key]: relValue ?? [] };
-          }
+          return {
+            ...row,
+            [key]:
+              rel.type === "hasOneThrough" ? relValue ?? null : relValue ?? [],
+          };
         });
       } else {
-        // Type guard for direct relation (hasOne, hasMany, belongsTo)
+        // Direct relations: hasOne, hasMany, belongsTo, belongsToMany
         const directRel = rel as Extract<
           typeof rel,
           { localKey: string; foreignKey: string; type?: string }
         >;
 
         let foreignData: any[] = [];
+
         if (
           directRel.type === "belongsTo" ||
           directRel.type === "belongsToMany"
         ) {
-          // belongsTo/belongsToMany: getMatchedSlugsFromIndexFiltersでslugリストを取得
+          // For belongsTo and belongsToMany, use foreignKey-based filtering
           const allLocalVals = result.flatMap((row) =>
             getAllFieldValues(row, directRel.localKey)
           );
+
           const slugs = await this.getMatchedSlugsFromIndexFilters(
             directRel.to,
             [{ field: directRel.foreignKey, op: "in", value: allLocalVals }],
-            // directRel.localKey
             this.resolver.resolveOne(directRel.to)
           );
+
           const uniqueSlugs = slugs ? Array.from(new Set(slugs)) : [];
           foreignData = await this.loader.loadBySlugs(
             directRel.to,
             uniqueSlugs
           );
         } else {
-          // hasOne/hasMany: localKey値をslugとしてloadBySlugs
+          // For hasOne and hasMany, localKey values are treated as slugs
           const allSlugs = result.flatMap((row) =>
             getAllFieldValues(row, directRel.localKey)
           );
@@ -318,7 +307,7 @@ export class QueryBuilder<T> {
             directRel.type === "belongsTo" ||
             directRel.type === "belongsToMany"
           ) {
-            // belongsTo/belongsToMany: localKey値がforeignKey値に含まれるものを逆参照
+            // Inverse lookup: match localKey values to foreignKey values
             const localVals = getAllFieldValues(row, directRel.localKey);
             const related = foreignData.filter((targetRow) => {
               const foreignVals = getAllFieldValues(
@@ -329,17 +318,12 @@ export class QueryBuilder<T> {
             });
             return { ...row, [key]: related };
           } else {
-            // hasOne/hasMany
             const relValue = resolveDirectRelation(row, directRel, foreignData);
-            const relType = directRel.type;
-
-            if (relType === "hasOne") {
-              return { ...row, [key]: relValue ?? null };
-            } else if (relType === "hasMany") {
-              return { ...row, [key]: relValue ?? [] };
-            } else {
-              return { ...row, [key]: relValue ?? [] };
-            }
+            return {
+              ...row,
+              [key]:
+                directRel.type === "hasOne" ? relValue ?? null : relValue ?? [],
+            };
           }
         });
       }
@@ -349,10 +333,7 @@ export class QueryBuilder<T> {
   }
 
   /**
-   * フィルタ適用（fallbackFilters）を行う
-   * @param result
-   * @param fallbackFilters
-   * @returns T[]
+   * Applies in-memory filters that could not be satisfied via index.
    */
   private applyFallbackFilters(result: T[], fallbackFilters: Filter[]): T[] {
     for (const filter of fallbackFilters) {
@@ -360,35 +341,24 @@ export class QueryBuilder<T> {
 
       result = result.filter((row) => {
         const vals = getAllFieldValues(row, field);
-
         if (vals.length === 0) return false;
         if (op === "eq") return vals[0] === value;
-        if (op === "contains")
-          return vals.some((v: string) => v.includes(value));
-
-        if (op === "in") {
-          if (!Array.isArray(value)) return false;
-
-          return vals.some((v: string) => value.includes(v));
-        }
-
+        if (op === "contains") return vals.some((v) => v.includes(value));
+        if (op === "in" && Array.isArray(value))
+          return vals.some((v) => value.includes(v));
         return false;
       });
     }
-
     return result;
   }
 
   /**
-   * インデックスフィルタから一致するslugリストを抽出する
-   * @param indexedFilters
-   * @param rsc
-   * @returns string[] | null
+   * Resolves matched slugs using index data based on filters.
    */
   private async getMatchedSlugsFromIndexFilters(
     sourceName: string,
     indexedFilters: Filter[],
-    rsc: rsc
+    rsc: RSC
   ): Promise<string[] | null> {
     let indexSlugs: string[] | null = null;
 
@@ -397,11 +367,9 @@ export class QueryBuilder<T> {
       let matched: string[] = [];
 
       if (field === "slug") {
-        // slug 検索の場合はそのまま返す
-
         matched.push(String(value));
       } else if (Object.keys(rsc.indexes?.split ?? {}).length) {
-        // 分割インデックスファイル方式
+        // Split-index handling
 
         if (op === "eq") {
           const keyValue = String(value);
@@ -437,8 +405,7 @@ export class QueryBuilder<T> {
           }
         }
       } else {
-        // 単一インデックスファイル方式
-
+        // Single-index handling
         if (op === "eq") {
           matched =
             (await this.indexer.getFieldIndex(
@@ -451,7 +418,7 @@ export class QueryBuilder<T> {
             (await this.indexer.getFieldIndexes(sourceName, field)) ?? {};
           matched = value.flatMap((v) => indexMap![String(v)] ?? []);
         } else if (op === "contains") {
-          const indexMap =
+          const indexMap: string[] =
             (await this.indexer.getFieldIndexes(sourceName, field)) ?? {};
           matched = Object.entries(indexMap)
             .filter(([k]) => k.includes(String(value)))
@@ -464,10 +431,6 @@ export class QueryBuilder<T> {
         : matched;
     }
 
-    if (!indexSlugs || indexSlugs.length === 0) {
-      return null;
-    }
-
-    return indexSlugs;
+    return indexSlugs?.length ? indexSlugs : null;
   }
 }

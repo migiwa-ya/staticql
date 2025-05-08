@@ -1,21 +1,19 @@
 # staticql
 
-**StaticQL (Static File Query Layer)** is a lightweight static data layer that allows you to query and join Markdown / YAML / JSON files directly. Queries are written using standard TypeScript syntax with full type inference support. While designed for small to medium-sized Jamstack and API projects, StaticQL is flexible enough to be used in a wide variety of contexts.
+StaticQL（Static File Query Layer） は、Markdown / YAML / JSON の静的ファイルをそのまま結合・検索できる軽量な静的データレイヤーです。型定義ベースで型推論が効くクエリを、TypeScript の標準構文で記述できます。小〜中規模の Jamstack や API での利用を想定していますが、幅広い場面での活用を目指しています。
 
-🇯🇵 日本語版はこちら → [README.ja.md](./README.ja.md)
+## 特長
 
-## Features
+- JSON Schema によるソース定義と簡易バリデーション
+- 型推論が効く SQL ライクなクエリ（where / join）
+- インデックスファイルの生成と活用による高速検索
+- Node.js / ブラウザ / Cloudflare Workers に対応
+- プラガブルなストレージ設計（fs, fetch, Workers の R2 など）
+- 定義ファイルとコンテンツ、インデックスの公開で Web UI でも利用可能
 
-- JSON Schema-based source definitions with lightweight validation
-- SQL-like queries with type inference (`where` / `join`)
-- Index file generation and usage for fast query performance
-- Supports Node.js, browser, and Cloudflare Workers
-- Pluggable storage layer (fs, fetch, Workers R2, etc.)
-- Works in Web UI by publishing schema, content, and index files
+## インストール
 
-## Installation
-
-```bash
+```
 npm install staticql
 ```
 
@@ -23,15 +21,23 @@ npm install staticql
 
 ```ts
 import { defineStaticQL } from "staticql";
+
+// ローカルファイルシステムから読み込むためのリポジトリ（Node.js用）
 import { FsRepository } from "staticql/repo/fs";
+
+// データソース定義から生成された型定義（生成方法は後述）
 import { HerbsRecord } from "./staticql-types";
 
+// データソースの定義
 const factory = defineStaticQL({
   sources: {
     herbs: {
+      // 対象ファイルパターン
       pattern: "content/herbs/*.md",
+      // ファイル形式
       type: "markdown",
       schema: {
+        // JSON Schema による構造定義
         type: "object",
         properties: {
           name: { type: "string" },
@@ -39,12 +45,15 @@ const factory = defineStaticQL({
         },
         required: ["name", "overview"],
       },
+      // インデックスを生成するキー
       index: ["name"],
+      // インデックスファイルをキーごとに分割
       splitIndexByKey: true,
     },
   },
 });
 
+// StaticQL インスタンスの生成・リポジトリを注入
 const staticql = factory({ repository: new FsRepository("tests/") });
 
 const result = await staticql
@@ -55,62 +64,72 @@ const result = await staticql
 console.log(result);
 ```
 
-**Each record's `slug` is automatically derived from the file name. You do not need to define it in the schema.**
+**各レコードの slug はファイル名から自動で抽出されます。スキーマに明記する必要はありません**
 
-## Generating TypeScript Definitions
+## スキーマ型定義の生成
 
-You can generate `staticql-types.ts` from your schema definitions to enable IntelliSense and type-safe queries.
+TypeScript の補完や型推論を有効にするため、`staticql-types.ts` を自動生成できます。
+生成された型を `from<HerbsRecord>()` のように使うと、クエリの補完が有効になります。
 
 ```bash
+# npx staticql-gen-types <config_file> <output_dir>
 npx staticql-gen-types ./staticql.config.json ./
 ```
 
-## Generating Index Files
+## インデックスファイルの生成
 
-To speed up queries, pre-generate index files using the following command. These indexes are used in `.where()` and `.join()` to avoid full scans.
+検索クエリの高速化のために、事前にインデックスファイルを作成します。
+生成されたインデックスは `.where()` や `.join()` 時に利用され、ファイル全体のフルスキャンを回避できます。
 
-### Full index generation
+### 全インデックス生成
 
 ```bash
+# npx staticql-gen-index <config_file> <output_dir>
 npx staticql-gen-index ./staticql.config.json ./public/index/
 ```
 
-### Incremental index generation
+### 差分インデックス作成
 
 ```bash
+# npx staticql-gen-index <config_file> <output_dir> --incremental --diff-file=<diff_file>
 npx staticql-gen-index ./staticql.config.json ./public/index/ --incremental --diff-file=./diff.json
 ```
 
-#### Diff file format
+#### 差分情報フォーマット
 
-Diff input is passed as a JSON array, useful for parsing git changes:
+差分情報は、git diff などから整形しやすい JSON 形式で受け渡します。  
+1 行ごとに 1 ファイルの差分を表現し、以下のような配列とします。
 
 ```json
 [
+  // 追加
   { "status": "A", "path": "content/foo.md" },
+  // 変更
   { "status": "M", "path": "content/bar.md" },
+  // 削除
   { "status": "D", "path": "content/baz.md" },
+  // リネーム
   { "status": "R", "path": "content/new.md", "oldPath": "content/old.md" }
 ]
 ```
 
-- `status`: `"A"` = added, `"M"` = modified, `"D"` = deleted, `"R"` = renamed
-- `path`: current file path
-- `oldPath`: original file path (for renamed files)
+- status: "A"=追加, "M"=変更, "D"=削除, "R"=リネーム
+- path: 追加/変更後のパス
+- oldPath: リネーム時の元パス
 
-### Example: generating diff file from git
+### 差分情報の生成例
 
 ```sh
 git diff --name-status $BASE_SHA $HEAD_SHA | awk '{ if ($1 == "R100") print "{\"status\":\"R\",\"path\":\""$3"\",\"oldPath\":\""$2"\"}"; else if ($1 == "A" || $1 == "M" || $1 == "D") print "{\"status\":\""$1"\",\"path\":\""$2"\"}"; }' | jq -s . > diff.json
 ```
 
-## Defining and Using Relations (`join`)
+## リレーションの定義と利用（Join）
 
-StaticQL supports relational joins between sources using `.join()`.
+StaticQL では、`join()` を使って異なるデータソースを結合できます。
 
-**Each record's `slug` is automatically derived from the file name and doesn't need to be included in the schema.**
+各レコードの slug はファイル名から自動で抽出されます。スキーマに明記する必要はありません
 
-### Example Content
+### データ例
 
 #### `herbs/*.md`
 
@@ -135,26 +154,29 @@ herbPartSlug: leaf
   name: 葉
 ```
 
-### Configuration Example
+### 定義ファイル（抜粋）
 
-```jsonc
+```json
 // ./staticql.config.json
+
 {
   "sources": {
     "herbs": {
       "pattern": "content/herbs/*.md",
       "type": "markdown",
       "schema": {
-        /* omitted */
+        /* 省略 */
       },
       "relations": {
         "tags": {
+          // タグとの hasMany リレーション（多対多）
           "to": "tags",
           "localKey": "tagSlugs",
           "foreignKey": "slug",
           "type": "hasMany"
         },
         "recipes": {
+          // 中間テーブルを介した hasManyThrough リレーション
           "to": "recipes",
           "through": "recipeGroups",
           "sourceLocalKey": "slug",
@@ -165,34 +187,37 @@ herbPartSlug: leaf
         }
       }
     },
+
     "tags": {
       "path": "content/tags.yaml",
       "type": "yaml",
       "schema": {
-        /* omitted */
+        /* 省略 */
       }
     },
+
     "recipeGroups": {
       "path": "content/recipeGroups/*.json",
       "type": "json",
       "schema": {
-        /* omitted */
+        /* 省略 */
       }
     },
+
     "recipes": {
       "pattern": "content/recipes/*.md",
       "type": "markdown",
       "schema": {
-        /* omitted */
+        /* 省略 */
       }
     }
   }
 }
 ```
 
-> Relation targets are automatically indexed; no need to include them in `index`.
+※relations に定義されたリレーション先のキーは、自動的にインデックスされるため、index フィールドに個別指定する必要はありません。
 
-### Query Example
+### クエリ例
 
 ```ts
 import { defineStaticQL } from "staticql";
@@ -201,7 +226,7 @@ import { HerbsRecord } from "./staticql-types";
 
 const factory = defineStaticQL({
   sources: {
-    /* omitted */
+    // ...（前述の定義ファイルに準拠）
   },
 });
 
@@ -242,6 +267,6 @@ For questions, feedback, or collaboration, feel free to reach out via:
 - X: https://x.com/migiwa_ya_com
 - GitHub Issues or Discussions
 
-## License
+## ライセンス
 
 MIT

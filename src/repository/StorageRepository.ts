@@ -1,36 +1,46 @@
 /**
- * StorageRepository: データソース/出力先のI/O抽象インターフェース
+ * StorageRepository: Abstract interface for reading and writing data sources.
+ *
+ * This defines the I/O contract used by StaticQL to interact with
+ * various storage backends (e.g., local FS, R2, GitHub, etc.).
  */
 export interface StorageRepository {
   /**
-   * 指定パスまたはその配下のファイル一覧を取得（ワイルドカード/プレフィックス対応）
-   * @param pattern 例: "herbs/*.md", "report/", "herbParts.yaml"
+   * Lists files matching a glob pattern or prefix.
+   *
+   * @param pattern - Path pattern (e.g., "herbs/*.md", "report/", "herbParts.yaml").
+   * @returns An array of matched file paths.
    */
   listFiles(pattern: string): Promise<string[]>;
 
   /**
-   * ファイルを読み込む
-   * @param path
+   * Reads the content of a file.
+   *
+   * @param path - The file path to read.
+   * @returns File content as a UTF-8 string.
    */
   readFile(path: string): Promise<string>;
 
   /**
-   * ファイルを書き込む
-   * @param path
-   * @param data
+   * Writes data to a file.
+   *
+   * @param path - Destination file path.
+   * @param data - File contents as a string or binary buffer.
    */
   writeFile(path: string, data: Uint8Array | string): Promise<void>;
 
   /**
-   * ファイルを削除する
-   * @param path
-   * @param data
+   * Removes a file.
+   *
+   * @param path - The file path to delete.
    */
   removeFile(path: string): Promise<void>;
 
   /**
-   * ファイルの存在確認
-   * @param path
+   * Checks if a file exists.
+   *
+   * @param path - The file path to check.
+   * @returns `true` if the file exists, otherwise `false`.
    */
   exists(path: string): Promise<boolean>;
 }

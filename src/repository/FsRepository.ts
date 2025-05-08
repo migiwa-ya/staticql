@@ -3,7 +3,7 @@ import * as path from "path";
 import { StorageRepository } from "./StorageRepository";
 
 /**
- * FSProvider: ローカルファイルシステム用StorageProvider実装
+ * FsRepository: StorageRepository implementation for the local file system.
  */
 export class FsRepository implements StorageRepository {
   baseDir: string;
@@ -13,9 +13,10 @@ export class FsRepository implements StorageRepository {
   }
 
   /**
-   * ファイルまたはディレクトリの存在確認
-   * @param filePath - 相対パス
-   * @returns 存在すればtrue、なければfalse
+   * Checks whether a file or directory exists.
+   *
+   * @param filePath - Relative path from baseDir.
+   * @returns `true` if the file exists, otherwise `false`.
    */
   async exists(filePath: string): Promise<boolean> {
     const abs = path.resolve(this.baseDir, filePath);
@@ -28,26 +29,40 @@ export class FsRepository implements StorageRepository {
     }
   }
 
+  /**
+   * Reads the content of a file as UTF-8 text.
+   *
+   * @param filePath - Relative path to the file.
+   * @returns File content as a string.
+   */
   async readFile(filePath: string): Promise<string> {
     const abs = path.resolve(this.baseDir, filePath);
-
     return await fs.readFile(abs, "utf-8");
   }
 
+  /**
+   * Writes data to a file (string or binary). Creates parent directories if needed.
+   *
+   * @param filePath - Relative file path.
+   * @param content - File content as string or Uint8Array.
+   */
   async writeFile(
     filePath: string,
     content: string | Uint8Array
   ): Promise<void> {
     const abs = path.resolve(this.baseDir, filePath);
-
     await fs.mkdir(path.dirname(abs), { recursive: true });
     await fs.writeFile(abs, content);
   }
 
   /**
-   * 指定されたパスまたはglobからファイル一覧を取得
-   * @param pathString - パスまたはglob
-   * @returns ファイルパス配列
+   * Lists all files under a given path or glob pattern.
+   *
+   * If the path points to a file, it returns an array with a single entry.
+   * Otherwise, recursively walks the directory and returns all file paths.
+   *
+   * @param pathString - Path or glob pattern (e.g. "data/*.json").
+   * @returns List of relative file paths.
    */
   async listFiles(pathString: string): Promise<string[]> {
     const abs = path.resolve(this.baseDir, pathString.replace(/\*.*$/, ""));
@@ -64,6 +79,12 @@ export class FsRepository implements StorageRepository {
     return result;
   }
 
+  /**
+   * Recursively walks through a directory and yields all file paths.
+   *
+   * @param pathString - Absolute path to start from.
+   * @yields Relative file paths from baseDir.
+   */
   async *walk(pathString: string): AsyncGenerator<string, void, unknown> {
     const dirHandle = await fs.opendir(pathString);
 
@@ -78,12 +99,12 @@ export class FsRepository implements StorageRepository {
   }
 
   /**
-   * 指定ファイルを削除
-   * @param filePath - 相対パス
+   * Deletes the specified file.
+   *
+   * @param filePath - Relative path to the file.
    */
   async removeFile(filePath: string): Promise<void> {
     const abs = path.resolve(this.baseDir, filePath);
-
     await fs.unlink(abs);
   }
 }

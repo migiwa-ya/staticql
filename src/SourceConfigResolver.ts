@@ -1,23 +1,32 @@
 import { Indexer } from "./Indexer.js";
 
+/**
+ * Represents a single content record, identified by a slug.
+ */
 export type SourceRecord = {
   slug: string;
 };
 
+/**
+ * Supported content types.
+ */
 export type SourceType = "markdown" | "yaml" | "json";
 
-// 暫定的なJSON Schema型
+/**
+ * Loosely-typed JSON Schema (for validation and structure hinting).
+ */
 type JSONSchema7 = {
   type?: string;
-  properties?: {
-    [key: string]: JSONSchema7;
-  };
+  properties?: Record<string, JSONSchema7>;
   items?: JSONSchema7;
   required?: string[];
   enum?: string[];
-  [key: string]: any; // その他プロパティの許容（緩めの設定）
+  [key: string]: any; // Allow additional schema keywords
 };
 
+/**
+ * Configuration for a single source (as defined in user config).
+ */
 export interface SourceConfig {
   type: SourceType;
   pattern: string;
@@ -27,6 +36,9 @@ export interface SourceConfig {
   splitIndexByKey?: boolean;
 }
 
+/**
+ * Internally resolved and enriched source configuration.
+ */
 export interface ResolvedSourceConfig {
   name: string;
   type: SourceType;
@@ -40,6 +52,9 @@ export interface ResolvedSourceConfig {
   };
 }
 
+/**
+ * Direct relation to another source.
+ */
 export type DirectRelation = {
   to: string;
   localKey: string;
@@ -47,6 +62,9 @@ export type DirectRelation = {
   type: "hasOne" | "hasMany" | "belongsTo" | "belongsToMany";
 };
 
+/**
+ * Through (intermediate) relation to another source.
+ */
 export type ThroughRelation = {
   to: string;
   through: string;
@@ -57,13 +75,22 @@ export type ThroughRelation = {
   type: "hasOneThrough" | "hasManyThrough";
 };
 
+/**
+ * Any supported relation type.
+ */
 export type Relation = DirectRelation | ThroughRelation;
 
+/**
+ * Resolves user-defined source configurations into a normalized internal format.
+ */
 export class SourceConfigResolver {
   private cache: Record<string, ResolvedSourceConfig> = {};
 
   constructor(private readonly sources: Record<string, SourceConfig>) {}
 
+  /**
+   * Resolves all sources and returns the enriched configurations.
+   */
   resolveAll(): ResolvedSourceConfig[] {
     if (Object.values(this.cache).length !== 0) {
       return Object.values(this.cache);
@@ -76,6 +103,13 @@ export class SourceConfigResolver {
     return Object.values(this.cache);
   }
 
+  /**
+   * Resolves a single source by name.
+   *
+   * @param sourceName - The name of the source.
+   * @returns Resolved configuration.
+   * @throws If the source does not exist.
+   */
   resolveOne(sourceName: string): ResolvedSourceConfig {
     if (this.cache[sourceName]) {
       return this.cache[sourceName];
@@ -117,10 +151,14 @@ export class SourceConfigResolver {
 
     if (relationalSources) {
       for (const [relKey, rel] of relationalSources) {
-        let field;
-        if (rel.type === "belongsTo" || rel.type === "belongsToMany") {
-          field = rel.foreignKey === "slug" ? null : rel.foreignKey;
-        } else if (rel.type === "hasOne" || rel.type === "hasMany") {
+        let field: string | null = null;
+
+        if (
+          rel.type === "belongsTo" ||
+          rel.type === "belongsToMany" ||
+          rel.type === "hasOne" ||
+          rel.type === "hasMany"
+        ) {
           field = rel.foreignKey === "slug" ? null : rel.foreignKey;
         } else if (
           rel.type === "hasOneThrough" ||
@@ -128,13 +166,9 @@ export class SourceConfigResolver {
         ) {
           if (rel.to === sourceName) {
             field =
-              rel.targetForeignKey === "slug"
-                ? null
-                : `${rel.targetForeignKey}`;
+              rel.targetForeignKey === "slug" ? null : rel.targetForeignKey;
           } else {
-            // rel.to === 'through'
-            field =
-              rel.throughLocalKey === "slug" ? null : `${rel.throughLocalKey}`;
+            field = rel.throughLocalKey === "slug" ? null : rel.throughLocalKey;
           }
         }
 
@@ -151,7 +185,7 @@ export class SourceConfigResolver {
       }
     }
 
-    const result = {
+    const result: ResolvedSourceConfig = {
       name: sourceName,
       pattern: source.pattern,
       type: source.type,
@@ -165,6 +199,9 @@ export class SourceConfigResolver {
     return result;
   }
 
+  /**
+   * Determines whether a relation is a through (indirect) relation.
+   */
   isThroughRelation(rel: Relation): rel is ThroughRelation {
     return (
       typeof rel === "object" &&
@@ -173,77 +210,65 @@ export class SourceConfigResolver {
     );
   }
 
+  /**
+   * Converts a list of slugs into full paths based on a glob pattern.
+   */
   static getSourcePathsBySlugs(pattern: string, slugs: string[]): string[] {
     const extMatch = pattern.match(/\.(\w+)$/);
     const ext = extMatch ? "." + extMatch[1] : "";
 
     let filteredSlugs = slugs;
+
     if (pattern.includes("*")) {
       const wcIdx = pattern.indexOf("*");
       let slugPattern = pattern.slice(wcIdx);
-      slugPattern = this.pathToSlug(slugPattern);
-      slugPattern = slugPattern.replace(/\.[^\.]+$/, "");
+      slugPattern = this.pathToSlug(slugPattern).replace(/\.[^\.]+$/, "");
       slugPattern = slugPattern
         .replace(/\*\*/g, "([\\w-]+(--)?)*")
         .replace(/\*/g, "[\\w-]+");
+
       const regex = new RegExp("^" + slugPattern + "$");
       filteredSlugs = slugs.filter((slug) => regex.test(slug));
     }
 
-    // slug→パス変換
     return filteredSlugs.map((slug) =>
       this.resolveFilePath(pattern, this.slugToPath(slug) + ext)
     );
   }
 
   /**
-   * slug（--区切り）をパス（/区切り）に変換
-   * @param slug
-   * @returns パス文字列
+   * Converts a slug (with `--`) to a file path (`/`).
    */
   static slugToPath(slug: string): string {
     return slug.replace(/--/g, "/");
   }
 
   /**
-   * パス（/区切り）をslug（--区切り）に変換
-   * @param path
-   * @returns パス文字列
+   * Converts a path (`/`) to a slug (with `--`).
    */
   static pathToSlug(path: string): string {
     return path.replace(/\//g, "--");
   }
 
   /**
-   * globパターンからワイルドカードより前のディレクトリ部分を抽出
-   * @param globPath - globを含むパス
-   * @returns ディレクトリパス
+   * Extracts the base directory from a glob pattern (up to the first wildcard).
    */
   static extractBaseDir(globPath: string): string {
     const parts = globPath.split("/");
     const index = parts.findIndex((part) => part.includes("*"));
-
-    if (index === -1) return globPath;
-    return parts.slice(0, index).join("/") + "/";
+    return index === -1 ? globPath : parts.slice(0, index).join("/") + "/";
   }
 
   /**
-   * sourceGlob, relativePathから論理パスを生成
-   * @param sourceGlob - globを含むパス
-   * @param relativePath - 相対パス
-   * @returns 論理パス
+   * Resolves a logical file path from a glob source and a relative path.
    */
   static resolveFilePath(sourceGlob: string, relativePath: string): string {
     const baseDir = this.extractBaseDir(sourceGlob);
-
     return baseDir + relativePath;
   }
 
   /**
-   * ファイルパスからslug（論理ID）を生成
-   * @param sourcePath - 設定で定義されたsourceのパス（glob含む）
-   * @param filePath - 実際のファイルパス
-   * @returns slug文字列
+   * Extracts the slug from a full file path using the source glob.
    */
   static getSlugFromPath(sourcePath: string, filePath: string): string {
     const ext = filePath.slice(filePath.lastIndexOf(".")) || "";
@@ -252,9 +277,6 @@ export class SourceConfigResolver {
       ? filePath.slice(baseDir.length)
       : filePath;
     if (rel.startsWith("/")) rel = rel.slice(1);
-
-    const slug = this.pathToSlug(rel.replace(ext, ""));
-
-    return slug;
+    return this.pathToSlug(rel.replace(ext, ""));
   }
 }

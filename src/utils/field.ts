@@ -1,21 +1,24 @@
 /**
- * 配列で要素数が1の場合は再帰的に中身を取り出す
- * @param value - 任意の値または配列
- * @returns 配列で要素数1なら中身、そうでなければそのまま
+ * Recursively unwraps a single-element array.
+ *
+ * @param value - Any value or array.
+ * @returns The unwrapped value if the input is a single-element array; otherwise returns the input as-is.
  */
 export function unwrapSingleArray(value: any) {
   while (Array.isArray(value) && value.length === 1) {
     value = value[0];
   }
-
   return value;
 }
 
 /**
- * オブジェクトからドット記法のパスで値を抽出し、文字列として返す
- * @param obj - 対象オブジェクト
- * @param fieldPath - ドット区切りのパス（例: "a.b.c"）
- * @returns 値が存在すれば文字列、なければ undefined
+ * Resolves a dot-notated field path from an object, returning the value as a string.
+ *
+ * If an intermediate path contains arrays, it will join stringified values with spaces.
+ *
+ * @param obj - The target object.
+ * @param fieldPath - Dot-separated path (e.g., "a.b.c").
+ * @returns A string value or `undefined` if the path is invalid.
  */
 export function resolveField(obj: any, fieldPath: string): string | undefined {
   const segments = fieldPath.split(".");
@@ -41,10 +44,13 @@ export function resolveField(obj: any, fieldPath: string): string | undefined {
 }
 
 /**
- * オブジェクトからドット記法のパスで全ての値（配列も含む）を抽出し、文字列配列として返す
- * @param obj - 対象オブジェクト
- * @param fieldPath - ドット区切りのパス（例: "a.b.c"）
- * @returns すべての値を文字列配列で返す（存在しない場合は空配列）
+ * Retrieves all values along a dot-notated field path from a given object.
+ *
+ * Unlike `resolveField`, this always returns a flattened string array of all values found.
+ *
+ * @param obj - The target object.
+ * @param fieldPath - Dot-separated path (e.g., "a.b.c").
+ * @returns An array of strings representing all values found; empty if none.
  */
 export function getAllFieldValues(obj: any, fieldPath: string): string[] {
   const segments = fieldPath.split(".");
@@ -60,7 +66,6 @@ export function getAllFieldValues(obj: any, fieldPath: string): string[] {
       .filter((v) => v !== undefined && v !== null);
   }
 
-  // Flatten any nested arrays and stringify primitives
   return values
     .flat(Infinity)
     .filter((v) => v !== undefined && v !== null)
@@ -68,14 +73,18 @@ export function getAllFieldValues(obj: any, fieldPath: string): string[] {
 }
 
 /**
- * オブジェクトまたは配列からネストしたプロパティパスの全値を抽出し、フラットな配列で返す
- * @param objOrArray - 対象オブジェクトまたはオブジェクト配列
- * @param path - プロパティパス配列（例: ['a', 'b']）
- * @returns パス上の全ての値をフラットな配列で返す
+ * Extracts all nested property values for a given path from an object or array of objects.
+ *
+ * Used for recursive property traversal when resolving relations or indexing.
+ *
+ * @param objOrArray - The input object or array of objects.
+ * @param path - An array of property keys (e.g., ['a', 'b']).
+ * @returns A flat array of all extracted values along the path.
  */
 export function extractNestedProperty(objOrArray: any, path: string[]): any[] {
   if (!Array.isArray(objOrArray)) objOrArray = [objOrArray];
   let results: any[] = objOrArray;
+
   for (const key of path) {
     results = results
       .map((item) => {
@@ -86,6 +95,5 @@ export function extractNestedProperty(objOrArray: any, path: string[]): any[] {
       .flat();
   }
 
-  // Flatten any nested arrays and remove undefined/null
   return results.flat(Infinity).filter((v) => v !== undefined && v !== null);
 }

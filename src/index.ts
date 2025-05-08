@@ -3,10 +3,10 @@ import { StaticQL, StaticQLConfig, StaticQLInitOptions } from "./StaticQL.js";
 import { StorageRepository } from "./repository/StorageRepository.js";
 
 /**
- * StaticQL インスタンスを生成するファクトリ関数
- * @param repository - レポジトリクラス
- * @param config - StaticQLConfig 設定オブジェクト
- * @returns StaticQL ファクトリー
+ * Factory function to create a StaticQL instance.
+ *
+ * @param config - The StaticQL configuration object.
+ * @returns A factory function that accepts a repository and optional init options.
  */
 export function defineStaticQL(config: StaticQLConfig) {
   return ({
@@ -21,5 +21,6 @@ export function defineStaticQL(config: StaticQLConfig) {
   };
 }
 
+// Re-exporting types for convenience
 export type { StaticQLConfig } from "./StaticQL.js";
 export type { Validator } from "./validator/Validator.js";

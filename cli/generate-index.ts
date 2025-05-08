@@ -10,19 +10,25 @@ import { ConsoleLogger } from "../src/logger/ConsoleLogger.js";
 
 const logger = new ConsoleLogger("info");
 
+/**
+ * Main CLI entry point.
+ */
 async function run() {
   const { config, outputDir, isIncremental, diffFilePath } = await getArgs();
   const staticql: StaticQL = init(config, outputDir, isIncremental);
 
   if (isIncremental && diffFilePath) {
-    await increment(staticql, diffFilePath);
+    await runIncremental(staticql, diffFilePath);
   } else {
-    await saveIndex(staticql);
+    await runFull(staticql);
   }
 }
 
 run();
 
+/**
+ * Parses CLI arguments and loads the JSON config file.
+ */
 function getArgs() {
   const args = process.argv.slice(2);
   let [configPath, outputDir] = args;
@@ -41,7 +47,7 @@ function getArgs() {
 
   if (isIncremental && !diffFilePath) {
     console.error(
-      "--incremental モードでは --diff-file=xxx.json の指定が必要です"
+      "Error: --incremental requires --diff-file=path/to/diff.json"
     );
     process.exit(1);
   }
@@ -52,6 +58,14 @@ function getArgs() {
   return { config, outputDir, isIncremental, diffFilePath };
 }
 
+/**
+ * Initializes the StaticQL instance with a file system repository.
+ *
+ * @param config - Parsed StaticQLConfig object
+ * @param outputDir - Output directory for index files
+ * @param isIncremental - If true, skip cleanup of existing index files
+ * @returns StaticQL instance
+ */
 function init(
   config: StaticQLConfig,
   outputDir: string,
@@ -62,10 +76,9 @@ function init(
       repository: new FsRepository(outputDir),
     });
 
-    // 出力前にインデックスディレクトリを削除（インクリメンタル時は削除しない）
+    // Clean up previous indexes if not in incremental mode
     if (!isIncremental) {
       const indexDir = path.resolve(outputDir, Indexer.indexPrefix);
-
       if (existsSync(indexDir)) {
         rmSync(indexDir, { recursive: true, force: true });
       }
@@ -73,41 +86,50 @@ function init(
 
     return staticql;
   } catch (err) {
-    console.error("Config 読み込みに失敗しました");
+    console.error("Failed to load StaticQL config.");
     console.error(err);
     process.exit(1);
   }
 }
 
-async function saveIndex(staticql: StaticQL) {
+/**
+ * Executes full index generation.
+ */
+async function runFull(staticql: StaticQL) {
   try {
-    logger.info("インデックスを生成中...");
+    logger.info("Generating full indexes...");
     await staticql.saveIndexes();
-    logger.info("インデックスを生成しました");
+    logger.info("Index generation completed.");
   } catch (err) {
-    logger.warn("インデックス生成中にエラーが発生しました");
+    logger.warn("An error occurred during full index generation.");
     logger.warn(err);
     process.exit(1);
   }
 }
 
-async function increment(staticql: StaticQL, diffFilePath: string) {
+/**
+ * Executes incremental index updates using a diff file.
+ *
+ * @param staticql - StaticQL instance
+ * @param diffFilePath - Path to diff JSON file
+ */
+async function runIncremental(staticql: StaticQL, diffFilePath: string) {
   let diffEntries: DiffEntry[];
 
   try {
     const diffJson = readFileSync(path.resolve(diffFilePath), "utf-8");
     diffEntries = JSON.parse(diffJson);
   } catch (e) {
-    logger.warn("差分ファイルの読み込みに失敗しました:", diffFilePath);
+    logger.warn("Failed to read diff file:", diffFilePath);
     process.exit(1);
   }
 
   try {
-    logger.info("インクリメンタルインデックス更新を実行します...");
+    logger.info("Running incremental index update...");
     await staticql.getIndexer().updateIndexesForFiles(diffEntries);
-    logger.info("インクリメンタルインデックス更新が完了しました");
+    logger.info("Incremental index update completed.");
   } catch (err) {
-    logger.warn("インデックス生成中にエラーが発生しました");
+    logger.warn("An error occurred during incremental indexing.");
     logger.warn(err);
     process.exit(1);
   }

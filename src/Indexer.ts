@@ -5,7 +5,7 @@ import {
 } from "./utils/relationResolver.js";
 import {
   Relation,
-  SourceConfigResolver as resolver,
+  SourceConfigResolver as Resolver,
   SourceRecord,
   ThroughRelation,
 } from "./SourceConfigResolver.js";
@@ -14,7 +14,7 @@ import { SourceLoader } from "./SourceLoader";
 import { LoggerProvider } from "./logger/LoggerProvider";
 
 /**
- * 差分更新用エントリ型
+ * Represents a file diff entry (for incremental index updates).
  */
 export type DiffEntry = {
   status: "A" | "M" | "D" | "R";
@@ -23,7 +23,7 @@ export type DiffEntry = {
 };
 
 /**
- * Indexer: インデックス生成の中核クラス
+ * Indexer: core class for building and updating search indexes.
  */
 export class Indexer {
   public static indexPrefix = "index";
@@ -31,14 +31,14 @@ export class Indexer {
   constructor(
     private readonly sourceLoader: SourceLoader<SourceRecord>,
     private readonly repository: StorageRepository,
-    private readonly resolver: resolver,
+    private readonly resolver: Resolver,
     private readonly logger: LoggerProvider
   ) {}
 
   /**
-   * 全sourceのインデックス/メタファイルを指定ディレクトリに出力する
-   * @returns void
-   * @throws ストレージ書き込み失敗時に例外
+   * Saves indexes and slug lists for all sources.
+   *
+   * @throws Error if writing to storage fails.
    */
   async save(): Promise<void> {
     for await (const { sourceName, records, indexFields } of this.build()) {
@@ -49,41 +49,28 @@ export class Indexer {
         const splitPrefix = indexes.split?.[field];
         const fieldPath = indexes.fields?.[field];
 
-        if (splitPrefix) {
-          // 分割ファイルインデックス保存
+        const keyMap: Record<string, string[]> = {};
 
-          const keyMap: Record<string, string[]> = {};
-          for (const rec of records) {
-            const value = rec.values[field];
-            if (value == null) continue;
-            for (const v of value.split(" ")) {
-              if (!v) continue;
-              if (!keyMap[v]) keyMap[v] = [];
-              keyMap[v].push(rec.slug);
-            }
+        for (const rec of records) {
+          const value = rec.values[field];
+          if (value == null) continue;
+
+          for (const v of value.split(" ")) {
+            if (!v) continue;
+            (keyMap[v] ??= []).push(rec.slug);
           }
-          for (const [keyValue, slugs] of Object.entries(keyMap)) {
-            const filePath = `${splitPrefix}${keyValue}.json`;
+        }
+
+        if (splitPrefix) {
+          for (const [key, slugs] of Object.entries(keyMap)) {
+            const filePath = `${splitPrefix}${key}.json`;
             await this.repository.writeFile(filePath, JSON.stringify(slugs));
           }
         } else if (fieldPath) {
-          // 単一ファイルインデックス保存
-
-          const indexMap: Record<string, string[]> = {};
-          for (const rec of records) {
-            const value = rec.values[field];
-            if (value == null) continue;
-            for (const v of value.split(" ")) {
-              if (!v) continue;
-              if (!indexMap[v]) indexMap[v] = [];
-              indexMap[v].push(rec.slug);
-            }
-          }
-          await this.repository.writeFile(fieldPath, JSON.stringify(indexMap));
+          await this.repository.writeFile(fieldPath, JSON.stringify(keyMap));
         }
       }
 
-      // slug インデックス
       if (indexes.all) {
         await this.repository.writeFile(
           indexes.all,
@@ -94,42 +81,45 @@ export class Indexer {
   }
 
   /**
-   * 差分情報に基づき、関連インデックスファイルのみを更新する（スケルトン）
-   * @param outputDir - 出力先ディレクトリ
-   * @param diffEntries - 差分情報配列
+   * Incrementally updates affected indexes based on diff entries.
+   *
+   * @param diffEntries - List of file change entries.
    */
   async updateIndexesForFiles(diffEntries: DiffEntry[]): Promise<void> {
     const sourceMap: Record<string, DiffEntry[]> = {};
+
+    // Group diff entries by source
     for (const entry of diffEntries) {
       const path = entry.path;
       for (const rsc of this.resolver.resolveAll()) {
         const baseDir = rsc.pattern?.replace(/\*.*$/, "") ?? "";
         const ext = rsc.pattern?.split(".").pop();
         if (path.startsWith(baseDir) && (!ext || path.endsWith("." + ext))) {
-          if (!sourceMap[rsc.name]) sourceMap[rsc.name] = [];
-          sourceMap[rsc.name].push(entry);
+          (sourceMap[rsc.name] ??= []).push(entry);
           break;
         }
       }
     }
 
+    // Process each affected source
     for (const [sourceName, entries] of Object.entries(sourceMap)) {
       const rsc = this.resolver.resolveOne(sourceName);
       const slugsToAdd: string[] = [];
       const slugsToDel: string[] = [];
       const slugRenames: { oldSlug: string; newSlug: string }[] = [];
+
       for (const entry of entries) {
         if (entry.status === "A" || entry.status === "M") {
-          slugsToAdd.push(resolver.getSlugFromPath(rsc.pattern!, entry.path));
+          slugsToAdd.push(Resolver.getSlugFromPath(rsc.pattern!, entry.path));
         } else if (entry.status === "D") {
-          slugsToDel.push(resolver.getSlugFromPath(rsc.pattern!, entry.path));
+          slugsToDel.push(Resolver.getSlugFromPath(rsc.pattern!, entry.path));
         } else if (entry.status === "R") {
           slugRenames.push({
-            oldSlug: resolver.getSlugFromPath(
+            oldSlug: Resolver.getSlugFromPath(
               rsc.pattern!,
               entry.oldPath || ""
             ),
-            newSlug: resolver.getSlugFromPath(rsc.pattern!, entry.path),
+            newSlug: Resolver.getSlugFromPath(rsc.pattern!, entry.path),
           });
         }
       }
@@ -139,7 +129,7 @@ export class Indexer {
         ...(rsc.indexes?.split ?? {}),
       });
 
-      /* ---------- 更新処理 ---------- */
+      /* ---------- Upsert Records ---------- */
       const slugsToUpsert = [
         ...slugsToAdd,
         ...slugRenames.map((r) => r.newSlug),
@@ -154,16 +144,15 @@ export class Indexer {
         const fieldPath = rsc.indexes?.fields?.[field];
 
         if (splitPrefix) {
-          // 分割ファイルインデックス保存
-
+          // Save as split index files
           const keyMap: Record<string, Set<string>> = {};
+
           for (const rec of records) {
             const value = resolveField(rec, field);
             if (value == null) continue;
             for (const v of String(value).split(" ")) {
               if (!v) continue;
-              keyMap[v] ??= new Set();
-              keyMap[v].add(rec.slug);
+              (keyMap[v] ??= new Set()).add(rec.slug);
             }
           }
 
@@ -172,10 +161,10 @@ export class Indexer {
             await this.repository.writeFile(path, JSON.stringify([...slugSet]));
           }
         } else if (fieldPath) {
-          // 単一ファイルインデックス保存
-
+          // Save as single index file
           let indexMap: Record<string, string[]> = {};
           indexMap = JSON.parse(await this.repository.readFile(fieldPath));
+
           for (const rec of records) {
             const value = resolveField(rec, field);
             if (value == null) continue;
@@ -190,7 +179,7 @@ export class Indexer {
         }
       }
 
-      /* ---------- 削除処理 ---------- */
+      /* ---------- Remove Records ---------- */
       const slugsToRemove = [
         ...slugsToDel,
         ...slugRenames.map((r) => r.oldSlug),
@@ -201,14 +190,16 @@ export class Indexer {
         const fieldPath = rsc.indexes?.fields?.[field];
 
         if (splitPrefix) {
-          // 分割ファイルインデックス保存
-
+          // Update split index files
           const indexDir = Indexer.getSplitIndexDir(sourceName, field);
-          let files: string[] = [];
-          files = await (this.repository as any).listFiles(indexDir);
+          const files: string[] = await (this.repository as any).listFiles(
+            indexDir
+          );
+
           for (const file of files) {
-            let slugs: string[] = [];
-            slugs = JSON.parse(await this.repository.readFile(file));
+            let slugs: string[] = JSON.parse(
+              await this.repository.readFile(file)
+            );
             const filtered = slugs.filter((s) => !slugsToRemove.includes(s));
 
             if (filtered.length === 0) {
@@ -218,10 +209,10 @@ export class Indexer {
             }
           }
         } else if (fieldPath) {
-          // 単一ファイルインデックス保存
-
+          // Update single index file
           let indexMap: Record<string, string[]> = {};
           indexMap = JSON.parse(await this.repository.readFile(fieldPath));
+
           for (const v of Object.keys(indexMap)) {
             indexMap[v] = indexMap[v].filter((s) => !slugsToRemove.includes(s));
             if (indexMap[v].length === 0) delete indexMap[v];
@@ -231,14 +222,15 @@ export class Indexer {
         }
       }
 
-      // slug インデックス
+      // Update slug index
       const slugPath = rsc.indexes?.all;
       if (slugPath) {
-        let slugList: string[] = [];
-        slugList = JSON.parse(await this.repository.readFile(slugPath));
-
+        let slugList: string[] = JSON.parse(
+          await this.repository.readFile(slugPath)
+        );
         const newSlugs = [...slugsToAdd, ...slugRenames.map((r) => r.newSlug)];
         slugList = slugList.filter((s) => !slugsToRemove.includes(s));
+
         for (const s of newSlugs) {
           if (!slugList.includes(s)) slugList.push(s);
         }
@@ -248,118 +240,85 @@ export class Indexer {
     }
   }
 
+  /** Loads all index files for a split field. */
   async getSplitIndexes(sourceName: string, field: string) {
     const indexDir = Indexer.getSplitIndexDir(sourceName, field);
     const indexPaths = await this.repository.listFiles(indexDir);
-    let indexMap: Record<string, string[]> = {};
+    const indexMap: Record<string, string[]> = {};
 
     for (const path of indexPaths) {
       const key = path.replace(/^.*\//, "").replace(/\.json$/, "");
-      const raw = await this.repository.readFile(path);
-      indexMap[key] = JSON.parse(raw);
+      indexMap[key] = JSON.parse(await this.repository.readFile(path));
     }
 
-    return Object.values(indexMap).length === 0 ? null : indexMap;
+    return Object.keys(indexMap).length ? indexMap : null;
   }
 
+  /** Lists file paths for a split field. */
   async getSplitIndexPaths(sourceName: string, field: string) {
     const indexDir = Indexer.getSplitIndexDir(sourceName, field);
-    const indexPaths = await this.repository.listFiles(indexDir);
-
-    return indexPaths;
+    return this.repository.listFiles(indexDir);
   }
 
+  /** Retrieves slug list from a split index file (if exists). */
   async getSplitIndex(sourceName: string, field: string, key: string) {
     const path = Indexer.getSplitIndexFilePath(sourceName, field, key);
-    let matched: string[] | null;
-
     try {
       const raw = await this.repository.readFile(path);
-      matched = JSON.parse(raw);
-    } catch (e) {
-      this.logger.info(`インデックスファイルが見つかりません`, {
-        sourceName,
-        path,
-      });
-      matched = null;
+      return JSON.parse(raw);
+    } catch {
+      this.logger.info("Index file not found", { sourceName, path });
+      return null;
     }
-
-    return matched;
   }
 
+  /** Loads entire field index map (non-split). */
   async getFieldIndexes(sourceName: string, field: string) {
-    let indexMap: Record<string, string[]> | null = null;
     const path = Indexer.getFieldIndexFilePath(sourceName, field);
-
     try {
       const raw = await this.repository.readFile(path);
-      indexMap = JSON.parse(raw);
-    } catch (e) {
-      this.logger.info(`インデックスファイルが見つかりません`, {
-        sourceName,
-        path,
-      });
-      indexMap = null;
+      return JSON.parse(raw);
+    } catch {
+      this.logger.info("Index file not found", { sourceName, field });
+      return null;
     }
-
-    return indexMap;
   }
 
+  /** Loads a single key's slugs from a field index map. */
   async getFieldIndex(sourceName: string, field: string, key: string) {
-    const indexes = await this.getFieldIndexes(sourceName, field);
-    if (!indexes) return null;
-
-    for (const [keyValue, index] of Object.entries(indexes)) {
-      if (keyValue === key) return index;
-    }
-
-    this.logger.info(`インデックスファイルが見つかりません`, {
-      sourceName,
-      field,
-    });
-
-    return null;
+    const index = await this.getFieldIndexes(sourceName, field);
+    return index?.[key] ?? null;
   }
 
+  /** Loads slug index (slug list) for the source. */
   async getSlugIndexes(sourceName: string) {
     const path = Indexer.getSlugIndexFilePath(sourceName);
-    let indexes: string[] | null = null;
-
     try {
-      const raw = await this.repository.readFile(path);
-      indexes = JSON.parse(raw);
-    } catch (e) {
-      this.logger.info(`インデックスファイルが見つかりません`, {
-        sourceName,
-      });
-      indexes = null;
+      return JSON.parse(await this.repository.readFile(path));
+    } catch {
+      this.logger.info("Slug index file not found", { sourceName });
+      return null;
     }
-
-    return indexes;
   }
 
   /**
-   * 全sourceについてインデックス用レコード配列を生成 AsyncGenerator で返す
-   * @returns AsyncGenerator<{ sourceName, records, indexFields }>
+   * Builds index records for all sources.
    */
   private async *build(): AsyncGenerator<{
     sourceName: string;
     records: any[];
     indexFields: string[];
   }> {
-    const sourceCnofigs = this.resolver.resolveAll();
+    const configs = this.resolver.resolveAll();
 
-    for (const { name } of sourceCnofigs) {
+    for (const { name } of configs) {
       const { records, indexFields } = await this.buildIndexRecords(name);
-
       yield { sourceName: name, records, indexFields };
     }
   }
 
   /**
-   * 1つのsourceについてインデックス用レコード配列を生成する
-   * @param sourceName
-   * @returns Promise<{ records, indexFields }>
+   * Builds indexable records for a single source (with joined relations).
    */
   private async buildIndexRecords(
     sourceName: string
@@ -367,7 +326,6 @@ export class Indexer {
     const rsc = this.resolver.resolveOne(sourceName);
     const relations = rsc.relations ?? {};
 
-    // 対象ソースとリレーションソースをロード
     const loadKeys = new Set<string>([sourceName]);
     for (const rel of Object.values(relations)) {
       if (this.isThroughRelation(rel)) {
@@ -377,35 +335,30 @@ export class Indexer {
         loadKeys.add(rel.to);
       }
     }
+
     const loadedArrays = await Promise.all(
-      Array.from(loadKeys).map((k) => this.sourceLoader.loadBySourceName(k))
+      Array.from(loadKeys).map((key) => this.sourceLoader.loadBySourceName(key))
     );
     const dataMap = Array.from(loadKeys).reduce<Record<string, any[]>>(
-      (acc, k, i) => ((acc[k] = loadedArrays[i]), acc),
+      (acc, key, i) => ((acc[key] = loadedArrays[i]), acc),
       {}
     );
 
-    // リレーションのアタッチ
     const attached = dataMap[sourceName].map((row) => {
-      const data: any = { ...row };
+      const result = { ...row };
       for (const [key, rel] of Object.entries(relations)) {
-        if (this.isThroughRelation(rel)) {
-          // throughリレーション
-          data[key] = resolveThroughRelation(
-            row,
-            rel,
-            dataMap[rel.through],
-            dataMap[rel.to]
-          );
-        } else {
-          // directリレーション
-          data[key] = resolveDirectRelation(row, rel, dataMap[rel.to]);
-        }
+        result[key] = this.isThroughRelation(rel)
+          ? resolveThroughRelation(
+              row,
+              rel,
+              dataMap[rel.through],
+              dataMap[rel.to]
+            )
+          : resolveDirectRelation(row, rel, dataMap[rel.to]);
       }
-      return data;
+      return result;
     });
 
-    // インデックス対象を抽出
     const indexFields = Array.from(
       new Set([
         ...Object.keys(rsc.indexes?.fields ?? {}),
@@ -415,9 +368,11 @@ export class Indexer {
 
     const records = attached.map((row) => {
       const values: Record<string, string> = {};
-      for (const fld of indexFields) {
-        const v = resolveField(row, fld);
-        if (v != null && String(v) !== "") values[fld] = String(v);
+      for (const field of indexFields) {
+        const value = resolveField(row, field);
+        if (value != null && String(value) !== "") {
+          values[field] = String(value);
+        }
       }
       return { slug: row.slug, values };
     });
@@ -425,11 +380,7 @@ export class Indexer {
     return { records, indexFields };
   }
 
-  /**
-   * リレーションが through か判定
-   * @param rel
-   * @returns
-   */
+  /** Determines whether the relation is a through-type. */
   private isThroughRelation(rel: Relation): rel is ThroughRelation {
     return (
       typeof rel === "object" &&
@@ -438,14 +389,7 @@ export class Indexer {
     );
   }
 
-  /**
-   * 分割インデックスファイルのパスを生成
-   * @param outputDir - 出力ディレクトリ
-   * @param sourceName - ソース名
-   * @param field - インデックスフィールド名
-   * @param keyValue - キー値
-   * @returns 例: output/herbs/index-name/カモミール.json
-   */
+  /** Returns full path to a split index file. */
   static getSplitIndexFilePath(
     sourceName: string,
     field: string,
@@ -454,27 +398,17 @@ export class Indexer {
     return `${this.getSplitIndexDir(sourceName, field)}${keyValue}.json`;
   }
 
+  /** Returns the directory path for a split index. */
   static getSplitIndexDir(sourceName: string, field: string): string {
     return `${this.indexPrefix}/${sourceName}/index-${field}/`;
   }
 
-  /**
-   * フィールド単位インデックスファイルのパスを生成
-   * @param outputDir - 出力ディレクトリ
-   * @param sourceName - ソース名
-   * @param field - インデックスフィールド名
-   * @returns 例: output/herbs.index-name.json
-   */
+  /** Returns the path for a single field index file. */
   static getFieldIndexFilePath(sourceName: string, field: string): string {
     return `${this.indexPrefix}/${sourceName}.index-${field}.json`;
   }
 
-  /**
-   * ソース全体インデックスファイルのパスを生成
-   * @param outputDir - 出力ディレクトリ
-   * @param sourceName - ソース名
-   * @returns 例: output/herbs.index.json
-   */
+  /** Returns the path to the slug index file. */
   static getSlugIndexFilePath(sourceName: string): string {
     return `${this.indexPrefix}/${sourceName}.index.json`;
   }

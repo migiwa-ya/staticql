@@ -1,7 +1,13 @@
 import { getAllFieldValues, resolveField } from "./field.js";
 
 /**
- * 配列データから指定パスの値ごとに親オブジェクト配列をMap化する
+ * Builds a map from foreign key values to parent objects.
+ *
+ * Useful for indexing related records by a specified field.
+ *
+ * @param data - Array of objects to index.
+ * @param foreignKeyPath - Dot-notated path to the key field.
+ * @returns A map of key to array of matching objects.
  */
 export function buildForeignKeyMap(
   data: any[],
@@ -21,7 +27,12 @@ export function buildForeignKeyMap(
 }
 
 /**
- * Mapのキー部分一致で値を抽出する
+ * Finds map entries whose keys partially match a keyword.
+ *
+ * @param map - A map to search.
+ * @param keyword - Keyword to match.
+ * @param options - Optional case-insensitive matching.
+ * @returns Matching values.
  */
 export function findEntriesByPartialKey<K extends string | undefined, V>(
   map: Map<K, V>,
@@ -38,34 +49,43 @@ export function findEntriesByPartialKey<K extends string | undefined, V>(
 }
 
 /**
- * 直接リレーション（hasOne/hasMany等）を解決し、関連オブジェクトを返す
+ * Resolves a direct relation (e.g., hasOne, hasMany) for a given row.
+ *
+ * @param row - The source object.
+ * @param rel - Relation metadata (including localKey and foreignKey).
+ * @param foreignData - The target dataset to match against.
+ * @returns Related object(s) or null.
  */
-export function resolveDirectRelation(row: any, rel: any, foreignData: any[]): any {
+export function resolveDirectRelation(
+  row: any,
+  rel: any,
+  foreignData: any[]
+): any {
   const foreignMap = buildForeignKeyMap(foreignData, rel.foreignKey);
   const relType = rel.type;
   const localVal = (resolveField(row, rel.localKey) ?? "") as string;
   const keys = localVal.split(" ").filter(Boolean);
 
-  // For each key, get all matching arrays of objects, flatten, and deduplicate
   const matches = keys
     .map((k: string) => findEntriesByPartialKey(foreignMap, k))
     .flat()
     .filter((v: any) => v);
 
   if (relType === "hasOne") {
-    if (matches.length > 0 && Array.isArray(matches[0])) {
-      return matches.flat()[0];
-    }
     return matches.length > 0 ? matches[0] : null;
-  } else if (relType === "hasMany") {
-    return matches.flat();
   } else {
     return matches.flat();
   }
 }
 
 /**
- * 中間テーブル（through）を介したリレーション（hasOneThrough/hasManyThrough等）を解決
+ * Resolves a through-relation (e.g., hasOneThrough, hasManyThrough).
+ *
+ * @param row - The source object.
+ * @param rel - Relation metadata including through and target keys.
+ * @param throughData - The intermediate dataset.
+ * @param targetData - The final related dataset.
+ * @returns Related object(s) or null.
  */
 export function resolveThroughRelation(
   row: any,
@@ -79,12 +99,11 @@ export function resolveThroughRelation(
       .split(" ")
       .includes(sourceKey)
   );
+
   const targetMap = new Map<string, any>(
-    targetData.map((r: any) => [
-      resolveField(r, rel.targetForeignKey) ?? "",
-      r,
-    ])
+    targetData.map((r: any) => [resolveField(r, rel.targetForeignKey) ?? "", r])
   );
+
   const targets = throughMatches
     .map((t: any) => {
       const throughKey = (resolveField(t, rel.throughLocalKey) ?? "") as string;
@@ -96,9 +115,6 @@ export function resolveThroughRelation(
     .flat();
 
   if (rel.type === "hasOneThrough") {
-    if (targets.length > 0 && Array.isArray(targets[0])) {
-      return targets[0];
-    }
     return targets.length > 0 ? targets[0] : null;
   } else {
     return targets;

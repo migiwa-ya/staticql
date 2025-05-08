@@ -1,7 +1,12 @@
 import { parseYAML } from "./yaml.js";
 
 /**
- * 簡易Markdownパーサー: frontmatter（YAML）を抽出し、bodyとattributesを返す
+ * parseMarkdown: Parses a Markdown string with optional YAML frontmatter.
+ *
+ * Extracts frontmatter (delimited by `---`) as metadata, and returns both attributes and content body.
+ *
+ * @param rawContent - The raw Markdown string to parse.
+ * @returns An object containing parsed frontmatter fields and the remaining Markdown body as `content`.
  */
 export function parseMarkdown({ rawContent }: { rawContent: string }) {
   const frontmatterMatch = rawContent.match(/^---\s*\n([\s\S]*?)\n---\s*\n?/);
@@ -11,8 +16,10 @@ export function parseMarkdown({ rawContent }: { rawContent: string }) {
   if (frontmatterMatch) {
     const parsed = parseYAML({ rawContent: frontmatterMatch[1] });
 
-    // YAMLが配列の場合は最初の要素をattributesとする
+    // If the frontmatter is an array, use the first item as attributes
     attributes = Array.isArray(parsed) ? parsed[0] : parsed;
+
+    // Remove frontmatter section from content
     body = rawContent.slice(frontmatterMatch[0].length);
   }
 

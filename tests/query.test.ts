@@ -4,7 +4,6 @@ import { FsRepository } from "../src/repository/FsRepository";
 import staticqlConfig from "./staticql.config.json";
 import { StaticQLConfig } from "../src/StaticQL";
 import { HerbsRecord, RecipesRecord } from "./staticql-types";
-
 const config = staticqlConfig as StaticQLConfig;
 const staticql = defineStaticQL(config)({
   repository: new FsRepository("tests/"),
@@ -55,7 +54,7 @@ describe("QueryBuilder with full scan", () => {
     expect(warnSpy).toHaveBeenCalled();
     const warningMessages = warnSpy.mock.calls
       .map((args) => args.join())
-      .some((msg) => msg.includes("インデックス未使用"));
+      .some((msg) => msg.includes("Fallback filter triggered"));
     expect(warningMessages).toBe(true);
     warnSpy.mockRestore();
   });

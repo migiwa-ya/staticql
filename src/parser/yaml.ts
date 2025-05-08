@@ -1,11 +1,18 @@
 /**
- * インデントベースの簡易YAMLパーサー
+ * parseYAML: A minimal YAML parser based on indentation.
+ *
+ * - Supports nested objects and arrays.
+ * - Handles inline arrays (`[a, b, c]`), multi-line arrays, booleans, numbers, and ISO date strings.
+ * - Does not support advanced YAML features (anchors, multi-docs, etc.).
+ *
+ * @param rawContent - Raw YAML string content.
+ * @returns Parsed JavaScript object or array.
  */
 export function parseYAML({ rawContent }: { rawContent: string }): any {
   const lines = rawContent.replace(/\r\n/g, "\n").split("\n");
   let idx = 0;
 
-  // 先頭の空行・コメント行をスキップ
+  // Skip initial blank lines or comments
   while (
     idx < lines.length &&
     (!lines[idx].trim() || lines[idx].trim().startsWith("#"))
@@ -13,7 +20,7 @@ export function parseYAML({ rawContent }: { rawContent: string }): any {
     idx++;
   }
 
-  // ルートが配列の場合は専用パーサー
+  // Root-level array
   if (lines[idx] && lines[idx].trim().startsWith("- ")) {
     return parseArrayBlock(0);
   }
@@ -32,13 +39,12 @@ export function parseYAML({ rawContent }: { rawContent: string }): any {
       const currentIndent = line.match(/^(\s*)/)![1].length;
       if (currentIndent < indent) break;
 
-      // インライン配列の複数行対応
       if (line.includes(":")) {
         const [key, ...rest] = line.split(":");
         let value = rest.join(":").trim();
         idx++;
 
-        // [ で始まるが ] で終わらない場合、次の行以降を結合
+        // Multi-line inline array
         if (value.startsWith("[") && !value.endsWith("]")) {
           let arrLines = [value];
           while (idx < lines.length) {
@@ -47,70 +53,58 @@ export function parseYAML({ rawContent }: { rawContent: string }): any {
             idx++;
             if (l.endsWith("]")) break;
           }
-          // 改行・余計な空白を除去して1行に
           value = arrLines.join(" ").replace(/\s+/g, " ");
         }
 
-        if (lines[idx]) {
-          const match = lines[idx].match(/^(\s*)/);
-          // ネスト配列対応: key: の値が空で、次の行がインデント増かつ - で始まる場合
-          if (
-            value === "" &&
-            match &&
-            match[1].length > currentIndent &&
-            lines[idx].trim().startsWith("- ")
-          ) {
-            // ネスト配列
-            result[key.trim()] = parseArrayBlock(currentIndent + 2);
+        const nextLine = lines[idx];
+        const match = nextLine?.match(/^(\s*)/);
+
+        if (
+          value === "" &&
+          match &&
+          match[1].length > currentIndent &&
+          nextLine.trim().startsWith("- ")
+        ) {
+          // Nested array
+          result[key.trim()] = parseArrayBlock(currentIndent + 2);
+        } else if (
+          value === "" &&
+          match &&
+          match[1].length > currentIndent &&
+          nextLine.trim().startsWith("[")
+        ) {
+          // Multi-line inline array
+          let arrLines = [];
+          while (idx < lines.length) {
+            const l = lines[idx].trim();
+            arrLines.push(l);
+            idx++;
+            if (l.endsWith("]")) break;
           }
-          // 複数行インライン配列対応: key: の値が空で、次の行がインデント増かつ [ で始まる場合
-          else if (
-            value === "" &&
-            match &&
-            match[1].length > currentIndent &&
-            lines[idx].trim().startsWith("[")
-          ) {
-            // 複数行インライン配列
-            let arrLines = [];
-            while (idx < lines.length) {
-              const l = lines[idx].trim();
-              arrLines.push(l);
-              idx++;
-              if (l.endsWith("]")) break;
-            }
-            const arrValue = arrLines.join(" ").replace(/\s+/g, " ");
-            result[key.trim()] = parseValue(arrValue);
-          } else if (match && match[1].length > currentIndent) {
-            // ネストオブジェクト
-            const child = parseBlock(currentIndent + 2);
-            result[key.trim()] = Object.keys(child).length
-              ? child
-              : parseValue(value);
-          } else {
-            result[key.trim()] = parseValue(value);
-          }
+          const arrValue = arrLines.join(" ").replace(/\s+/g, " ");
+          result[key.trim()] = parseValue(arrValue);
+        } else if (match && match[1].length > currentIndent) {
+          const child = parseBlock(currentIndent + 2);
+          result[key.trim()] = Object.keys(child).length
+            ? child
+            : parseValue(value);
         } else {
           result[key.trim()] = parseValue(value);
         }
       } else if (line.trim().startsWith("- ")) {
         if (!arr) arr = [];
-        // 配列要素の先頭
         let itemLine = line.slice(line.indexOf("- ") + 2);
 
-        // オブジェクト形式か単一値か判定
         if (itemLine.includes(":")) {
-          // - key: value ... の場合
           const [firstKey, ...rest] = itemLine.split(":");
           const firstValue = rest.join(":").trim();
           const obj: any = {};
           obj[firstKey.trim()] = parseValue(firstValue);
           idx++;
-          // ネストが続く場合
           const child = parseBlock(currentIndent + 2);
           Object.assign(obj, child);
           arr.push(obj);
         } else {
-          // - value の場合
           arr.push(parseValue(itemLine.trim()));
           idx++;
         }
@@ -119,14 +113,11 @@ export function parseYAML({ rawContent }: { rawContent: string }): any {
       }
     }
 
-    // 配列として返すべきか判定
     if (arr && arr.length > 0) return arr;
-    // ルートが空配列の場合も配列で返す
     if (arr && arr.length === 0 && indent === 0) return [];
     return result;
   }
 
-  // ルートが配列の場合の専用パーサー
   function parseArrayBlock(indent = 0): any[] {
     const arr: any[] = [];
     while (idx < lines.length) {
@@ -135,8 +126,10 @@ export function parseYAML({ rawContent }: { rawContent: string }): any {
         idx++;
         continue;
       }
+
       const currentIndent = line.match(/^(\s*)/)![1].length;
       if (currentIndent < indent) break;
+
       if (line.trim().startsWith("- ")) {
         let itemLine = line.slice(line.indexOf("- ") + 2);
         if (itemLine.includes(":")) {
@@ -145,7 +138,6 @@ export function parseYAML({ rawContent }: { rawContent: string }): any {
           const obj: any = {};
           obj[firstKey.trim()] = parseValue(firstValue);
           idx++;
-          // ネストが続く場合
           const child = parseBlock(currentIndent + 2);
           Object.assign(obj, child);
           arr.push(obj);
@@ -162,23 +154,17 @@ export function parseYAML({ rawContent }: { rawContent: string }): any {
 
   function parseValue(val: string): any {
     if (val === "true") return true;
-
     if (val === "false") return false;
-
     if (/^-?\d+(\.\d+)?$/.test(val)) return Number(val);
 
-    // インライン配列表記 [a, b, c]（複数行対応・空白/カンマ/クォート除去）
     if (val.startsWith("[") && val.endsWith("]")) {
       return val
         .slice(1, -1)
         .split(",")
-        .map(
-          (s) => s.replace(/^[\s'"]+|[\s'",]+$/g, "") // 先頭・末尾の空白・クォート・カンマを除去
-        )
+        .map((s) => s.replace(/^[\s'"]+|[\s'",]+$/g, ""))
         .filter((s) => s.length > 0);
     }
 
-    // ISO8601日時→Date型
     if (
       typeof val === "string" &&
       /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(
@@ -193,9 +179,5 @@ export function parseYAML({ rawContent }: { rawContent: string }): any {
   }
 
   const parsed = parseBlock(0);
-
-  // ルートが配列の場合はそのまま返す
-  if (Array.isArray(parsed)) return parsed;
-
   return parsed;
 }

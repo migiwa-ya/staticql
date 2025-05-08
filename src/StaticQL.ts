@@ -12,15 +12,24 @@ import { defaultValidator } from "./validator/defaultValidator.js";
 import { ConsoleLogger } from "./logger/ConsoleLogger.js";
 import { LoggerProvider } from "./logger/LoggerProvider.js";
 
+/**
+ * Initialization options for StaticQL.
+ */
 export interface StaticQLInitOptions {
   validator?: Validator;
   logger?: LoggerProvider;
 }
 
+/**
+ * Configuration for StaticQL.
+ */
 export interface StaticQLConfig {
   sources: Record<string, SourceConfig>;
 }
 
+/**
+ * The core class for querying structured static content.
+ */
 export class StaticQL {
   private validator: Validator;
   private logger: LoggerProvider;
@@ -36,9 +45,10 @@ export class StaticQL {
   }
 
   /**
-   * 指定sourceの型安全なQueryBuilderを生成する
-   * @param sourceName - source名
-   * @returns QueryBuilder<T>
+   * Creates a type-safe QueryBuilder for the specified source.
+   *
+   * @param sourceName - Name of the source.
+   * @returns A new QueryBuilder instance.
    */
   from<T extends SourceRecord>(sourceName: string): QueryBuilder<T> {
     const sourceLoader = new SourceLoader<T>(
@@ -64,26 +74,27 @@ export class StaticQL {
   }
 
   /**
-   * 全sourceのインデックス/メタファイルを config.storage.output ディレクトリに出力する
-   * @returns Promise<void>
-   * @throws ストレージ書き込み失敗時に例外
+   * Saves index files for all sources
+   * to the configured output directory.
+   *
+   * @throws If writing to the storage fails.
    */
-  async saveIndexes() {
+  async saveIndexes(): Promise<void> {
     await this.getIndexer().save();
   }
 
   /**
-   * 設定情報を返す
-   * @returns StaticQLConfig
+   * Returns the configuration object used by StaticQL.
    */
-  getConfig() {
+  getConfig(): StaticQLConfig {
     return this.config;
   }
 
   /**
-   * Indexerインスタンスを返す（インクリメンタルインデックス更新用）
+   * Returns an Indexer instance.
+   * Useful for incremental index updates.
    */
-  getIndexer() {
+  getIndexer(): Indexer {
     const sourceLoader = new SourceLoader<SourceRecord>(
       this.repository,
       this.sourceConfigResolver,

@@ -1,3 +1,12 @@
+/**
+ * Performs a simple runtime validation of a value against a JSON-like schema.
+ *
+ * Supported types: "string", "number", "integer", "boolean", "date", "null", "array", "object".
+ *
+ * @param data - The value to validate.
+ * @param schema - The validation schema object.
+ * @throws Error if the data does not conform to the schema.
+ */
 export function simpleValidate(data: any, schema: any): void {
   const expectedType = schema.type;
 
