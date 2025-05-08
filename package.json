@@ -1,23 +1,13 @@
 {
   "name": "@migiwa-ya/staticql",
-  "version": "0.18.1",
+  "version": "0.19.0",
   "type": "module",
-  "main": "dist/src/index.node.js",
-  "types": "./dist/src/index.node.d.ts",
+  "main": "dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/src/index.node.js",
-      "types": "./dist/src/index.node.d.ts",
-      "workerd": "./dist/src/index.workerd.js",
-      "browser": "./dist/src/index.browser.js"
-    },
-    "./workerd": {
-      "import": "./dist/src/index.workerd.js",
-      "types": "./dist/src/index.workerd.d.ts"
-    },
-    "./browser": {
-      "import": "./dist/src/index.browser.js",
-      "types": "./dist/src/index.browser.d.ts"
+      "import": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
     },
     "./types": {
       "types": "./dist/src/types.d.ts"
@@ -25,8 +15,7 @@
   },
   "bin": {
     "staticql-gen-index": "./dist/cli/generate-index.js",
-    "staticql-gen-type": "./dist/cli/generate-types.js",
-    "staticql-gen-schema": "./dist/cli/generate-schema.js"
+    "staticql-gen-type": "./dist/cli/generate-types.js"
   },
   "files": [
     "dist",

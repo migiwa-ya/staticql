@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeAll } from "vitest";
-import { defineStaticQL } from "../src/index.node";
+import { defineStaticQL, FileSystemRepository } from "../src/index";
 import staticqlConfig from "./staticql.config.json";
 import { StaticQLConfig } from "../src/StaticQL";
 import { HerbsRecord, RecipesRecord } from "./staticql-types";
 
 const config = staticqlConfig as StaticQLConfig;
-const staticql = defineStaticQL(config)({ baseDir: "tests/" });
+const staticql = defineStaticQL(config)({
+  repository: new FileSystemRepository("tests/"),
+});
 
 beforeAll(async () => {
   await staticql.saveIndexes();

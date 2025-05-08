@@ -3,6 +3,9 @@
 import path from "path";
 import { promises as fs } from "fs";
 import { SourceConfig } from "../src/SourceConfigResolver";
+import { ConsoleLogger } from "../src/logger/ConsoleLogger.js";
+
+const logger = new ConsoleLogger("info");
 
 async function run() {
   const { config, outPath } = await getArgs();
@@ -16,7 +19,7 @@ async function getArgs() {
   let [configPath, outputDir] = process.argv.slice(2);
 
   if (!configPath || !outputDir) {
-    console.error(
+    logger.warn(
       "Error: Expected at least 2 arguments: <config_file> <output_dir>"
     );
     process.exit(1);
@@ -30,8 +33,8 @@ async function getArgs() {
     const configRaw = await fs.readFile(configPath, "utf-8");
     config = JSON.parse(configRaw);
   } catch (err) {
-    console.error("Config 読み込みに失敗しました");
-    console.error(err);
+    logger.warn("Config 読み込みに失敗しました");
+    logger.warn(err);
     process.exit(1);
   }
 
@@ -42,10 +45,10 @@ async function writeTypeDefs(outPath: string, typeDefs: string) {
   try {
     await fs.mkdir(path.dirname(outPath), { recursive: true });
     await fs.writeFile(outPath, typeDefs);
-    console.log(`Types generated to ${outPath}`);
+    logger.info(`Types generated to ${outPath}`);
   } catch (err) {
-    console.error("型定義ファイルの出力に失敗しました");
-    console.error(err);
+    logger.warn("型定義ファイルの出力に失敗しました");
+    logger.warn(err);
     process.exit(1);
   }
 }

@@ -2,9 +2,12 @@
 
 import path from "path";
 import { existsSync, rmSync, readFileSync } from "fs";
-import { defineStaticQL } from "../src/index.node.js";
+import { defineStaticQL, FileSystemRepository } from "../src/index.js";
 import { StaticQL, StaticQLConfig } from "../src/StaticQL.js";
 import { DiffEntry, Indexer } from "../src/Indexer.js";
+import { ConsoleLogger } from "../src/logger/ConsoleLogger.js";
+
+const logger = new ConsoleLogger("info");
 
 async function run() {
   const { config, outputDir, isIncremental, diffFilePath } = await getArgs();
@@ -54,7 +57,9 @@ function init(
   isIncremental: boolean
 ) {
   try {
-    const staticql = defineStaticQL(config)({ baseDir: outputDir });
+    const staticql = defineStaticQL(config)({
+      repository: new FileSystemRepository(outputDir),
+    });
 
     // 出力前にインデックスディレクトリを削除（インクリメンタル時は削除しない）
     if (!isIncremental) {
@@ -75,12 +80,12 @@ function init(
 
 async function saveIndex(staticql: StaticQL) {
   try {
-    console.log("index.json を生成中...");
+    logger.info("インデックスを生成中...");
     await staticql.saveIndexes();
-    console.log("index.json を生成しました");
+    logger.info("インデックスを生成しました");
   } catch (err) {
-    console.error("インデックス生成中にエラーが発生しました");
-    console.error(err);
+    logger.warn("インデックス生成中にエラーが発生しました");
+    logger.warn(err);
     process.exit(1);
   }
 }
@@ -92,17 +97,17 @@ async function increment(staticql: StaticQL, diffFilePath: string) {
     const diffJson = readFileSync(path.resolve(diffFilePath), "utf-8");
     diffEntries = JSON.parse(diffJson);
   } catch (e) {
-    console.error("差分ファイルの読み込みに失敗しました:", diffFilePath);
+    logger.warn("差分ファイルの読み込みに失敗しました:", diffFilePath);
     process.exit(1);
   }
 
   try {
-    console.log("インクリメンタルインデックス更新を実行します...");
+    logger.info("インクリメンタルインデックス更新を実行します...");
     await staticql.getIndexer().updateIndexesForFiles(diffEntries);
-    console.log("インクリメンタルインデックス更新が完了しました");
+    logger.info("インクリメンタルインデックス更新が完了しました");
   } catch (err) {
-    console.error("インデックス生成中にエラーが発生しました");
-    console.error(err);
+    logger.warn("インデックス生成中にエラーが発生しました");
+    logger.warn(err);
     process.exit(1);
   }
 }
