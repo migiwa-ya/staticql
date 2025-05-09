@@ -7,84 +7,94 @@
  * @param schema - The validation schema object.
  * @throws Error if the data does not conform to the schema.
  */
-export function simpleValidate(data: any, schema: any): void {
+export function simpleValidate(
+  data: any,
+  schema: any,
+  path: string = ""
+): void {
   const expectedType = schema.type;
 
   if (!expectedType) return;
 
-  if (expectedType === "null") {
-    if (data !== null) {
-      throw new Error(`Expected null, got ${typeof data}`);
+  const types = Array.isArray(expectedType) ? expectedType : [expectedType];
+
+  const fullPath = path || "value";
+
+  // Handle null
+  if (data === null) {
+    if (!types.includes("null")) {
+      throw new Error(
+        `Expected ${types.join(" or ")} at '${fullPath}', got null`
+      );
     }
     return;
   }
 
-  if (expectedType === "array") {
+  // Handle arrays
+  if (types.includes("array")) {
     if (!Array.isArray(data)) {
-      throw new Error(`Expected array, got ${typeof data}`);
+      throw new Error(`Expected array at '${fullPath}', got ${typeof data}`);
     }
     if (schema.items) {
-      for (const item of data) {
-        simpleValidate(item, schema.items);
+      for (let i = 0; i < data.length; i++) {
+        simpleValidate(data[i], schema.items, `${fullPath}[${i}]`);
       }
     }
     return;
   }
 
-  if (expectedType === "object") {
-    if (typeof data !== "object" || data === null || Array.isArray(data)) {
-      throw new Error(`Expected object, got ${typeof data}`);
+  // Handle objects
+  if (types.includes("object")) {
+    if (typeof data !== "object" || Array.isArray(data)) {
+      throw new Error(`Expected object at '${fullPath}', got ${typeof data}`);
     }
 
     for (const key of schema.required ?? []) {
       if (!(key in data)) {
-        throw new Error(`Missing required field: ${key}`);
+        throw new Error(`Missing required field: '${fullPath}.${key}'`);
       }
     }
 
     for (const [key, propSchema] of Object.entries(schema.properties ?? {})) {
       const val = data[key];
       if (val !== undefined) {
-        simpleValidate(val, propSchema);
+        simpleValidate(val, propSchema, `${fullPath}.${key}`);
       }
     }
     return;
   }
 
+  // Handle primitives
   const actualType = typeof data;
+  let valid = false;
 
-  switch (expectedType) {
-    case "string":
-      if (actualType !== "string") {
-        throw new Error(`Expected string, got ${actualType}`);
-      }
-      break;
+  for (const type of types) {
+    switch (type) {
+      case "string":
+        if (actualType === "string") valid = true;
+        break;
+      case "number":
+        if (actualType === "number") valid = true;
+        break;
+      case "integer":
+        if (actualType === "number" && Number.isInteger(data)) valid = true;
+        break;
+      case "boolean":
+        if (actualType === "boolean") valid = true;
+        break;
+      case "date":
+        if (typeof data === "string" && !isNaN(Date.parse(data))) valid = true;
+        break;
+      case "null":
+        // already handled
+        break;
+    }
+    if (valid) break;
+  }
 
-    case "number":
-      if (actualType !== "number") {
-        throw new Error(`Expected number, got ${actualType}`);
-      }
-      break;
-
-    case "integer":
-      if (actualType !== "number" || !Number.isInteger(data)) {
-        throw new Error(`Expected integer, got ${data}`);
-      }
-      break;
-
-    case "boolean":
-      if (actualType !== "boolean") {
-        throw new Error(`Expected boolean, got ${actualType}`);
-      }
-      break;
-
-    case "date":
-      if (!(typeof data === "string" && !isNaN(Date.parse(data)))) {
-        throw new Error(`Expected date (ISO 8601 string), got ${data}`);
-      }
-      break;
-
-    default:
-      throw new Error(`Unsupported type in schema: ${expectedType}`);
+  if (!valid) {
+    throw new Error(
+      `Expected ${types.join(" or ")} at '${fullPath}', got ${actualType}`
+    );
   }
 }

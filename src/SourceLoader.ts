@@ -50,11 +50,11 @@ export class SourceLoader<T> {
     let validated = [];
 
     if (Array.isArray(parsed)) {
-      parsed.map((p) => this.validator.validate(p, rsc.schema));
+      parsed.map((p) => this.validator.validate(p, rsc.schema, rsc.name));
       validated = parsed.flat();
     } else {
       parsed.slug = Resolver.getSlugFromPath(rsc.pattern, filePath);
-      this.validator.validate(parsed, rsc.schema);
+      this.validator.validate(parsed, rsc.schema, rsc.name);
       validated = parsed;
     }
 
@@ -88,10 +88,10 @@ export class SourceLoader<T> {
       if (Array.isArray(parsed)) {
         const found = parsed.find((item) => item && item.slug === slug);
         if (!found) throw new Error(`Slug not found in file: ${filePath}`);
-        this.validator.validate(found, rsc.schema);
+        this.validator.validate(found, rsc.schema, rsc.name);
         return found as T;
       } else {
-        this.validator.validate(parsed, rsc.schema);
+        this.validator.validate(parsed, rsc.schema, rsc.name);
         return parsed as T;
       }
     } catch (err) {

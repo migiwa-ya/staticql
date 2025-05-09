@@ -13,9 +13,10 @@ export const defaultValidator: Validator = {
    *
    * @param data - The data to validate.
    * @param schema - The JSON-like schema definition.
+   * @param path - The schema property name.
    * @throws If validation fails.
    */
-  validate(data, schema) {
-    simpleValidate(data, schema);
+  validate(data, schema, path) {
+    simpleValidate(data, schema, path);
   },
 };

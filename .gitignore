@@ -8,9 +8,9 @@ dist/
 .idea/
 *.log
 
-/docs
-.clinerules
+/note
 
 # tests
 /tests/staticql-types.d.ts
 /tests/index
+/sample

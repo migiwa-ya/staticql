@@ -268,7 +268,7 @@ export class Indexer {
       const raw = await this.repository.readFile(path);
       return JSON.parse(raw);
     } catch {
-      this.logger.info("Index file not found", { sourceName, path });
+      this.logger.debug("Index file not found", { sourceName, path });
       return null;
     }
   }
@@ -280,7 +280,7 @@ export class Indexer {
       const raw = await this.repository.readFile(path);
       return JSON.parse(raw);
     } catch {
-      this.logger.info("Index file not found", { sourceName, field });
+      this.logger.debug("Index file not found", { sourceName, field });
       return null;
     }
   }

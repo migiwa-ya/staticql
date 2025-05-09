@@ -1,4 +1,5 @@
 import { Indexer } from "./Indexer.js";
+import { JSONSchema7 } from "./validator/Validator.js";
 
 /**
  * Represents a single content record, identified by a slug.
@@ -11,18 +12,6 @@ export type SourceRecord = {
  * Supported content types.
  */
 export type SourceType = "markdown" | "yaml" | "json";
-
-/**
- * Loosely-typed JSON Schema (for validation and structure hinting).
- */
-type JSONSchema7 = {
-  type?: string;
-  properties?: Record<string, JSONSchema7>;
-  items?: JSONSchema7;
-  required?: string[];
-  enum?: string[];
-  [key: string]: any; // Allow additional schema keywords
-};
 
 /**
  * Configuration for a single source (as defined in user config).
