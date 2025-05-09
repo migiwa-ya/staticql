@@ -54,22 +54,33 @@ export function findEntriesByPartialKey<K extends string | undefined, V>(
  * @param row - The source object.
  * @param rel - Relation metadata (including localKey and foreignKey).
  * @param foreignData - The target dataset to match against.
+ * @param foreignMapOpt - (optional) Pre-built foreign key map for performance.
  * @returns Related object(s) or null.
  */
 export function resolveDirectRelation(
   row: any,
   rel: any,
-  foreignData: any[]
+  foreignData: any[],
+  foreignMapOpt?: Map<string, any[]>
 ): any {
-  const foreignMap = buildForeignKeyMap(foreignData, rel.foreignKey);
+  const foreignMap =
+    foreignMapOpt ?? buildForeignKeyMap(foreignData, rel.foreignKey);
   const relType = rel.type;
   const localVal = (resolveField(row, rel.localKey) ?? "") as string;
   const keys = localVal.split(" ").filter(Boolean);
 
-  const matches = keys
-    .map((k: string) => findEntriesByPartialKey(foreignMap, k))
-    .flat()
-    .filter((v: any) => v);
+  let matches: any[] = [];
+  if (rel.exactMatch || keys.length === 1) {
+    for (const k of keys) {
+      const arr = foreignMap.get(k);
+      if (arr) matches.push(...arr);
+    }
+  } else {
+    matches = keys
+      .map((k: string) => findEntriesByPartialKey(foreignMap, k))
+      .flat()
+      .filter((v: any) => v);
+  }
 
   if (relType === "hasOne") {
     return matches.length > 0 ? matches[0] : null;
@@ -85,13 +96,15 @@ export function resolveDirectRelation(
  * @param rel - Relation metadata including through and target keys.
  * @param throughData - The intermediate dataset.
  * @param targetData - The final related dataset.
+ * @param targetMapOpt - (optional) Pre-built target key map for performance.
  * @returns Related object(s) or null.
  */
 export function resolveThroughRelation(
   row: any,
   rel: any,
   throughData: any[],
-  targetData: any[]
+  targetData: any[],
+  targetMapOpt?: Map<string, any>
 ): any {
   const sourceKey = (resolveField(row, rel.sourceLocalKey) ?? "") as string;
   const throughMatches = throughData.filter((t: any) =>
@@ -100,9 +113,14 @@ export function resolveThroughRelation(
       .includes(sourceKey)
   );
 
-  const targetMap = new Map<string, any>(
-    targetData.map((r: any) => [resolveField(r, rel.targetForeignKey) ?? "", r])
-  );
+  const targetMap =
+    targetMapOpt ??
+    new Map<string, any>(
+      targetData.map((r: any) => [
+        resolveField(r, rel.targetForeignKey) ?? "",
+        r,
+      ])
+    );
 
   const targets = throughMatches
     .map((t: any) => {

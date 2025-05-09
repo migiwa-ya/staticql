@@ -2,6 +2,7 @@ import { resolveField } from "./utils/field.js";
 import {
   resolveDirectRelation,
   resolveThroughRelation,
+  buildForeignKeyMap,
 } from "./utils/relationResolver.js";
 import {
   Relation,
@@ -344,17 +345,42 @@ export class Indexer {
       {}
     );
 
+    // Create pre-cache for relation map
+    const relationMaps: Record<string, any> = {};
+    for (const [key, rel] of Object.entries(relations)) {
+      if (this.isThroughRelation(rel)) {
+        relationMaps[key] = {
+          targetMap: new Map(
+            dataMap[rel.to].map((r: any) => [
+              resolveField(r, rel.targetForeignKey) ?? "",
+              r,
+            ])
+          ),
+        };
+      } else {
+        relationMaps[key] = {
+          foreignMap: buildForeignKeyMap(dataMap[rel.to], rel.foreignKey),
+        };
+      }
+    }
+
     const attached = dataMap[sourceName].map((row) => {
       const result = { ...row };
       for (const [key, rel] of Object.entries(relations)) {
         result[key] = this.isThroughRelation(rel)
-          ? resolveThroughRelation(
+          ? (result[key] = resolveThroughRelation(
               row,
               rel,
               dataMap[rel.through],
-              dataMap[rel.to]
-            )
-          : resolveDirectRelation(row, rel, dataMap[rel.to]);
+              dataMap[rel.to],
+              relationMaps[key].targetMap
+            ))
+          : (result[key] = resolveDirectRelation(
+              row,
+              rel,
+              dataMap[rel.to],
+              relationMaps[key].foreignMap
+            ));
       }
       return result;
     });
