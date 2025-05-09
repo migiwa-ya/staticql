@@ -63,6 +63,12 @@ export class Indexer {
         }
 
         if (splitPrefix) {
+          // save splited index list
+          await this.repository.writeFile(
+            `${splitPrefix}_meta.json`,
+            JSON.stringify(Object.keys(keyMap))
+          );
+
           for (const [key, slugs] of Object.entries(keyMap)) {
             const filePath = `${splitPrefix}${key}.json`;
             await this.repository.writeFile(filePath, JSON.stringify(slugs));
@@ -157,6 +163,12 @@ export class Indexer {
             }
           }
 
+          // save splited index list
+          await this.repository.writeFile(
+            `${splitPrefix}_meta.json`,
+            JSON.stringify(Object.keys(keyMap))
+          );
+
           for (const [keyValue, slugSet] of Object.entries(keyMap)) {
             const path = `${splitPrefix}${keyValue}.json`;
             await this.repository.writeFile(path, JSON.stringify([...slugSet]));
@@ -196,19 +208,32 @@ export class Indexer {
           const files: string[] = await (this.repository as any).listFiles(
             indexDir
           );
+          const remainingKeys = new Set<string>();
 
           for (const file of files) {
-            let slugs: string[] = JSON.parse(
+            if (file.endsWith("meta.json")) continue;
+
+            const slugs: string[] = JSON.parse(
               await this.repository.readFile(file)
             );
             const filtered = slugs.filter((s) => !slugsToRemove.includes(s));
 
+            const key = file.replace(/^.*\//, "").replace(/\.json$/, "");
+
             if (filtered.length === 0) {
               await this.repository.removeFile(file);
-            } else if (filtered.length !== slugs.length) {
+            } else {
               await this.repository.writeFile(file, JSON.stringify(filtered));
+              remainingKeys.add(key);
             }
           }
+
+          // Update meta.json
+          const metaPath = indexDir + "meta.json";
+          await this.repository.writeFile(
+            metaPath,
+            JSON.stringify([...remainingKeys])
+          );
         } else if (fieldPath) {
           // Update single index file
           let indexMap: Record<string, string[]> = {};
@@ -241,24 +266,20 @@ export class Indexer {
     }
   }
 
-  /** Loads all index files for a split field. */
-  async getSplitIndexes(sourceName: string, field: string) {
-    const indexDir = Indexer.getSplitIndexDir(sourceName, field);
-    const indexPaths = await this.repository.listFiles(indexDir);
-    const indexMap: Record<string, string[]> = {};
-
-    for (const path of indexPaths) {
-      const key = path.replace(/^.*\//, "").replace(/\.json$/, "");
-      indexMap[key] = JSON.parse(await this.repository.readFile(path));
-    }
-
-    return Object.keys(indexMap).length ? indexMap : null;
-  }
-
   /** Lists file paths for a split field. */
   async getSplitIndexPaths(sourceName: string, field: string) {
-    const indexDir = Indexer.getSplitIndexDir(sourceName, field);
-    return this.repository.listFiles(indexDir);
+    const dir = Indexer.getSplitIndexDir(sourceName, field);
+
+    // get splited index file list (_meta.json)
+    const metaPath = `${dir}_meta.json`;
+    if (await this.repository.exists(metaPath)) {
+      const keys: string[] = JSON.parse(
+        await this.repository.readFile(metaPath)
+      );
+      return keys.map((key) => `${dir}${key}.json`);
+    }
+
+    return await this.repository.listFiles(dir);
   }
 
   /** Retrieves slug list from a split index file (if exists). */

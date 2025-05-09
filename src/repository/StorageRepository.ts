@@ -1,3 +1,5 @@
+import { SourceConfigResolver as Resolver } from "../SourceConfigResolver";
+
 /**
  * StorageRepository: Abstract interface for reading and writing data sources.
  *
@@ -43,4 +45,12 @@ export interface StorageRepository {
    * @returns `true` if the file exists, otherwise `false`.
    */
   exists(path: string): Promise<boolean>;
+
+  /**
+   * A setter for accessing SourceConfigResolver within the class.
+   * It is set internally during the initialization of the index.ts.
+   *
+   * @param resolver
+   */
+  setResolver?(resolver: Resolver): void;
 }

@@ -17,6 +17,15 @@ export function defineStaticQL(config: StaticQLConfig) {
     options?: StaticQLInitOptions;
   }) => {
     const sourceConfigResolver = new SourceConfigResolver(config.sources);
+
+    // Set to a repository that needs RSC
+    if (
+      "setResolver" in repository &&
+      typeof repository.setResolver === "function"
+    ) {
+      repository.setResolver(sourceConfigResolver);
+    }
+
     return new StaticQL(config, repository, sourceConfigResolver, options);
   };
 }

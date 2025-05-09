@@ -1,4 +1,4 @@
-import { SourceConfigResolver as resolver } from "../SourceConfigResolver";
+import { SourceConfigResolver as Resolver } from "../SourceConfigResolver";
 import type { StorageRepository } from "./StorageRepository";
 
 /**
@@ -10,9 +10,14 @@ import type { StorageRepository } from "./StorageRepository";
  */
 export class FetchRepository implements StorageRepository {
   baseUrl: string;
+  resolver?: Resolver;
 
-  constructor(baseUrl: string = "/", private resolver: resolver) {
+  constructor(baseUrl: string = "/") {
     this.baseUrl = baseUrl.replace(/\/+$/, "") + "/";
+  }
+
+  setResolver(resolver: Resolver) {
+    this.resolver = resolver;
   }
 
   /**
@@ -53,16 +58,29 @@ export class FetchRepository implements StorageRepository {
    * @returns List of matching file paths (relative to base).
    */
   async listFiles(pattern: string): Promise<string[]> {
-    const m = pattern.match(/^([^\/\.\*]+)/);
-    const sourceName = m ? m[1] : null;
-    const rsc = this.resolver.resolveOne(sourceName ?? "");
+    const allRSCs = this.resolver?.resolveAll() ?? [];
+    const rsc = allRSCs.find((r) =>
+      pattern.startsWith(r.indexes?.all ?? r.pattern)
+    );
     if (!rsc) return [];
+
+    if (rsc.indexes?.split) {
+      for (const [field, prefix] of Object.entries(rsc.indexes.split)) {
+        if (pattern.startsWith(prefix)) {
+          const metaUrl = this.baseUrl + `${prefix}_meta.json`;
+          const res = await fetch(metaUrl);
+          if (!res.ok) return [];
+          const keys: string[] = await res.json();
+          return keys.map((key) => `${prefix}${key}.json`);
+        }
+      }
+    }
 
     const slugs: string[] = rsc.indexes?.all
       ? await this.fetchIndexFile(rsc.indexes.all)
       : [];
 
-    return resolver.getSourcePathsBySlugs(pattern, slugs);
+    return Resolver.getSourcePathsBySlugs(pattern, slugs);
   }
 
   /**
