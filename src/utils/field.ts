@@ -12,7 +12,7 @@ export function unwrapSingleArray(value: any) {
 }
 
 /**
- * Resolves a dot-notated field path from an object, returning the value as a string.
+ * Resolves a dot-notated field path from an object, returning the value as a array.
  *
  * If an intermediate path contains arrays, it will join stringified values with spaces.
  *
@@ -20,39 +20,7 @@ export function unwrapSingleArray(value: any) {
  * @param fieldPath - Dot-separated path (e.g., "a.b.c").
  * @returns A string value or `undefined` if the path is invalid.
  */
-export function resolveField(obj: any, fieldPath: string): string | undefined {
-  const segments = fieldPath.split(".");
-  let value: any = obj;
-
-  for (const seg of segments) {
-    value = unwrapSingleArray(value);
-
-    if (Array.isArray(value)) {
-      value = value.map((v) => v?.[seg]);
-    } else {
-      value = value?.[seg];
-    }
-
-    if (value == null) return undefined;
-  }
-
-  if (Array.isArray(value)) {
-    return value.filter((v) => v).join(" ");
-  }
-
-  return String(value);
-}
-
-/**
- * Retrieves all values along a dot-notated field path from a given object.
- *
- * Unlike `resolveField`, this always returns a flattened string array of all values found.
- *
- * @param obj - The target object.
- * @param fieldPath - Dot-separated path (e.g., "a.b.c").
- * @returns An array of strings representing all values found; empty if none.
- */
-export function getAllFieldValues(obj: any, fieldPath: string): string[] {
+export function resolveField(obj: any, fieldPath: string): string[] {
   const segments = fieldPath.split(".");
   let values: any[] = [obj];
 

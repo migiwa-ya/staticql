@@ -45,6 +45,10 @@ export class SourceLoader<T> {
    * @returns Parsed and validated content.
    */
   async load(filePath: string, rsc: RSC) {
+    if (!(await this.repository.exists(filePath))) {
+      throw new Error(`Target Source [${filePath}] is not found.`);
+    }
+
     const rawContent = await this.repository.readFile(filePath);
     const parsed = await parseByType(rsc.type, { rawContent });
     let validated = [];

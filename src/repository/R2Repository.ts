@@ -67,6 +67,22 @@ export class R2Repository implements StorageRepository {
   }
 
   /**
+   * Opens a file as a ReadableStream from Cloudflare R2.
+   *
+   * @param path - Key within the bucket.
+   * @returns ReadableStream of the file contents.
+   * @throws Error if the object does not exist.
+   */
+  async openFileStream(path: string): Promise<ReadableStream> {
+    const fullKey = this.buildKey(path);
+    const object = await this.bucket.get(fullKey);
+    if (!object || !object.body) {
+      throw new Error(`Object not found: ${fullKey}`);
+    }
+    return object.body;
+  }
+
+  /**
    * Writes data to the R2 bucket.
    *
    * @param path - Key to write.
@@ -94,6 +110,16 @@ export class R2Repository implements StorageRepository {
    * @param path - Key to delete.
    */
   async removeFile(path: string): Promise<void> {
+    const fullKey = this.buildKey(path);
+    await this.bucket.delete(fullKey);
+  }
+
+  /**
+   * Deletes the specified file from the R2 bucket.
+   *
+   * @param path - Key to delete.
+   */
+  async removeDir(path: string): Promise<void> {
     const fullKey = this.buildKey(path);
     await this.bucket.delete(fullKey);
   }

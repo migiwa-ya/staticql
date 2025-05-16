@@ -23,6 +23,14 @@ export interface StorageRepository {
    */
   readFile(path: string): Promise<string>;
 
+  /*
+   * Opens a file as a web-compatible ReadableStream.
+   *
+   * @param path - Relative path to the file (from the repository base directory)
+   * @returns Promise that resolves to a ReadableStream for the file contents
+   */
+  openFileStream(path: string): Promise<ReadableStream>;
+
   /**
    * Writes data to a file.
    *
@@ -37,6 +45,8 @@ export interface StorageRepository {
    * @param path - The file path to delete.
    */
   removeFile(path: string): Promise<void>;
+
+  removeDir(path: string): Promise<void>;
 
   /**
    * Checks if a file exists.

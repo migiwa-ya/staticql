@@ -1,4 +1,4 @@
-import { getAllFieldValues } from "./utils/field.js";
+import { resolveField } from "./utils/field.js";
 import {
   resolveDirectRelation,
   resolveThroughRelation,
@@ -11,75 +11,39 @@ import {
   SourceRecord,
 } from "./SourceConfigResolver";
 import { LoggerProvider } from "./logger/LoggerProvider";
+import {
+  createPageInfo,
+  decodeCursor,
+  encodeCursor,
+  getPageSlice,
+  PageInfo,
+} from "./utils/pagenation.js";
+import { Fields, JoinableKeys, PrefixIndexLine } from "./utils/typs.js";
 
-// Extract joinable fields (those referencing SourceRecord or SourceRecord[])
-type JoinableKeys<T> = {
-  [K in keyof T]: NonNullable<T[K]> extends SourceRecord | SourceRecord[]
-    ? `${Extract<K, string>}`
-    : never;
-}[keyof T];
-
-// Extract queryable fields (excluding relations)
-type SourceFields<T> = {
-  [K in keyof T]: NonNullable<T[K]> extends SourceRecord | SourceRecord[]
-    ? never
-    : NonNullable<T[K]> extends (infer U)[]
-    ? U extends object
-      ? NestedKeys<U, Extract<K, string>>
-      : K
-    : NonNullable<T[K]> extends object
-    ? NestedKeys<NonNullable<T[K]>, Extract<K, string>>
-    : K;
-}[keyof T];
-
-// Nest traversal depth limiter
-type Prev = [never, 0, 1, 2, 3, 4, 5];
-
-// Recursively extract dot-notated nested keys
-type NestedKeys<T, Prefix extends string = "", Depth extends number = 3> = [
-  Depth
-] extends [never]
-  ? never
-  : T extends object
-  ? {
-      [K in keyof T]: NonNullable<T[K]> extends object
-        ? NestedKeys<
-            NonNullable<T[K]>,
-            `${Prefix}${Prefix extends "" ? "" : "."}${Extract<K, string>}`,
-            Prev[Depth]
-          >
-        : `${Prefix}${Prefix extends "" ? "" : "."}${Extract<K, string>}`;
-    }[keyof T]
-  : never;
-
-// Extract fields from relational records
-type RelationalFields<T> = {
-  [K in keyof T]: NonNullable<T[K]> extends SourceRecord | SourceRecord[]
-    ? NonNullable<T[K]> extends (infer U)[]
-      ? U extends object
-        ? NestedKeys<U, Extract<K, string>>
-        : never
-      : NonNullable<T[K]> extends object
-      ? NestedKeys<NonNullable<T[K]>, Extract<K, string>>
-      : never
-    : K;
-}[keyof T];
-
-// All queryable fields
-type Fields<T> = RelationalFields<T> | SourceFields<T>;
-
-type Operator = "eq" | "contains" | "in";
+type Operator = "eq" | "startsWith" | "in";
 
 type Filter =
-  | { field: string; op: "eq" | "contains"; value: string }
+  | { field: string; op: "eq" | "startsWith"; value: string }
   | { field: string; op: "in"; value: string[] };
+
+type OrderByDirection = "asc" | "desc";
+
+export interface PageResult<T> {
+  data: T[];
+  pageInfo: PageInfo;
+}
 
 /**
  * QueryBuilder allows for type-safe querying and joining of static structured data.
  */
-export class QueryBuilder<T> {
+export class QueryBuilder<T extends SourceRecord> {
   private joins: string[] = [];
   private filters: Filter[] = [];
+  private _orderByKey?: Fields<T>;
+  private _orderByDirection: OrderByDirection = "asc";
+  private _cursorValue?: string;
+  private _cursorDirection: "after" | "before" = "after";
+  private _pageSize: number = 20;
 
   constructor(
     private sourceName: string,
@@ -110,7 +74,7 @@ export class QueryBuilder<T> {
    */
   where(
     field: Fields<T>,
-    op: "eq" | "contains",
+    op: "eq" | "startsWith",
     value: string
   ): QueryBuilder<T>;
   where(field: Fields<T>, op: "in", value: string[]): QueryBuilder<T>;
@@ -119,7 +83,54 @@ export class QueryBuilder<T> {
     op: Operator,
     value: string | string[]
   ): QueryBuilder<T> {
+    if (op === "startsWith" && value.length < 2) {
+      throw new Error(
+        "The value for 'startsWith' must be more than 2 characters."
+      );
+    }
+
     this.filters.push({ field, op, value } as Filter);
+    return this;
+  }
+
+  /**
+   * Specifies the sorting order for the query.
+   *
+   * @param key - Field to order by. Default is "slug".
+   * @param direction - Sort direction: "asc" or "desc". Default is "asc".
+   * @returns This instance (for method chaining).
+   */
+  orderBy(key: Fields<T>, direction: OrderByDirection = "asc"): this {
+    this._orderByKey = key;
+    this._orderByDirection = direction;
+    return this;
+  }
+
+  /**
+   * Sets the pagination cursor for the query.
+   *
+   * @param cursor - The encoded cursor string (usually Base64).
+   *   Use the `endCursor` from the previous page's `pageInfo` for forward pagination,
+   *   or the `startCursor` for backward pagination.
+   * @param direction - Pagination direction: `"after"` for next page, `"before"` for previous page.
+   *   Defaults to `"after"`.
+   * @returns This instance (for method chaining).
+   */
+  cursor(value?: string, direction: "after" | "before" = "after"): this {
+    this._cursorValue = value;
+    this._cursorDirection = direction;
+    return this;
+  }
+
+  /**
+   * Sets the number of records to return per page.
+   *
+   * @param n - The maximum number of records to return for this query (page size).
+   *   Should be a positive integer.
+   * @returns This instance (for method chaining).
+   */
+  pageSize(n: number): this {
+    this._pageSize = n;
     return this;
   }
 
@@ -128,47 +139,62 @@ export class QueryBuilder<T> {
    *
    * @returns Matched data records.
    */
-  async exec(): Promise<T[]> {
+  async exec(): Promise<PageResult<T> | []> {
     const rsc = this.resolver.resolveOne(this.sourceName);
-    const { indexedFilters, fallbackFilters } = this.extractIndexFilters(rsc);
+    const filters = this.extractIndexFilters(rsc);
+    const requiresJoin = this.joins.length > 0;
+    const orderByKey = this._orderByKey;
+    const hasLocalValue = rsc.schema?.properties?.[String(orderByKey)] != null;
 
-    const requiresJoin =
-      fallbackFilters.some((f) => f.field.includes(".")) ||
-      this.joins.length > 0;
+    let matched = await this.getMatchedIndexes(this.sourceName, filters, rsc);
+    if (!matched) return [];
+    const total = matched.length;
 
-    let matchedSlugs = await this.getMatchedSlugsFromIndexFilters(
-      this.sourceName,
-      indexedFilters,
-      rsc
+    const startIdx = this.getStartIdx(matched, this._cursorValue);
+    const page = getPageSlice(
+      matched,
+      startIdx,
+      this._pageSize,
+      this._cursorDirection
     );
 
-    let result: T[] =
-      matchedSlugs && matchedSlugs.length > 0
-        ? await Promise.all(
-            matchedSlugs.map((slug) =>
-              this.loader.loadBySlug(this.sourceName, slug)
-            )
-          )
-        : await this.loader.loadBySourceName(this.sourceName);
+    const slugs = page.flatMap((x) => Object.keys(x.r));
+    let data = (await this.loader.loadBySlugs(this.sourceName, slugs)) as T[];
+    if (hasLocalValue && requiresJoin) data = await this.applyJoins(data, rsc);
 
-    if (requiresJoin) {
-      result = await this.applyJoins(result, rsc);
-    }
+    const pageInfo = createPageInfo(
+      total,
+      page,
+      this._pageSize,
+      startIdx,
+      matched.length,
+      this._cursorDirection,
+      (item) => encodeCursor(Object.keys(item.r)[0])
+    );
 
-    result = this.applyFallbackFilters(result, fallbackFilters);
-    return result;
+    return { data, pageInfo };
   }
 
   /**
-   * Categorizes filters into index-usable and fallback (in-memory) filters.
+   * Get the starting position from the specified cursor.
    */
-  private extractIndexFilters(rsc: RSC): {
-    indexedFilters: Filter[];
-    fallbackFilters: Filter[];
-  } {
-    const fieldIndexes = Object.keys(rsc.indexes?.fields ?? {});
-    const splitIndexes = Object.keys(rsc.indexes?.split ?? {});
-    const indexableFields = new Set(["slug", ...fieldIndexes, ...splitIndexes]);
+  private getStartIdx(
+    matched: PrefixIndexLine[],
+    cursorValue?: string
+  ): number {
+    if (!cursorValue) return 0;
+    const slug = decodeCursor(cursorValue);
+    return matched.findIndex((x) => Object.keys(x.r).includes(slug));
+  }
+
+  /**
+   * Categorizes filters into index-usable filters.
+   */
+  private extractIndexFilters(rsc: RSC): Filter[] {
+    const indexableFields = new Set([
+      "slug",
+      ...Object.keys(rsc.indexes ?? {}),
+    ]);
 
     const indexedFilters = this.filters.filter((f) =>
       indexableFields.has(f.field)
@@ -178,14 +204,12 @@ export class QueryBuilder<T> {
     );
 
     if (fallbackFilters.length > 0) {
-      this.logger.warn(
-        "Fallback filter triggered (full scan)",
-        this.sourceName,
-        fallbackFilters
+      throw new Error(
+        `[${this.sourceName}] needs index: ${JSON.stringify(fallbackFilters)}`
       );
     }
 
-    return { indexedFilters, fallbackFilters };
+    return indexedFilters;
   }
 
   /**
@@ -196,136 +220,10 @@ export class QueryBuilder<T> {
       const rel = rsc.relations?.[key];
       if (!rel) throw new Error(`Unknown relation: ${key}`);
 
-      // Check if the relation is a "through" relation
-      const isThrough =
-        rel.type === "hasOneThrough" || rel.type === "hasManyThrough";
-
-      if (isThrough) {
-        // For "hasOneThrough" and "hasManyThrough" relations
-
-        const sourceSlugs = result.flatMap((row) =>
-          getAllFieldValues(row, rel.sourceLocalKey)
-        );
-
-        // If the intermediate table doesn't use "slug", index-based lookup is required
-        const uniqueSourceSlugs =
-          rel.throughForeignKey !== "slug"
-            ? (await this.getMatchedSlugsFromIndexFilters(
-                rel.through,
-                [
-                  {
-                    field: rel.throughForeignKey,
-                    op: "in",
-                    value: sourceSlugs,
-                  },
-                ],
-                this.resolver.resolveOne(rel.through)
-              )) ?? []
-            : Array.from(new Set(sourceSlugs));
-
-        const throughData = await this.loader.loadBySlugs(
-          rel.through,
-          uniqueSourceSlugs
-        );
-
-        const targetSlugs = throughData.flatMap((t) =>
-          getAllFieldValues(t, rel.throughLocalKey)
-        );
-
-        // If the target table doesn't use "slug", index-based lookup is required
-        const uniqueTargetSlugs =
-          rel.targetForeignKey !== "slug"
-            ? (await this.getMatchedSlugsFromIndexFilters(
-                rel.to,
-                [{ field: rel.targetForeignKey, op: "in", value: targetSlugs }],
-                this.resolver.resolveOne(rel.through)
-              )) ?? []
-            : Array.from(new Set(targetSlugs));
-
-        const targetData = await this.loader.loadBySlugs(
-          rel.to,
-          uniqueTargetSlugs
-        );
-
-        result = result.map((row) => {
-          const relValue = resolveThroughRelation(
-            row,
-            rel,
-            throughData,
-            targetData
-          );
-
-          return {
-            ...row,
-            [key]:
-              rel.type === "hasOneThrough" ? relValue ?? null : relValue ?? [],
-          };
-        });
+      if (rel.type === "hasOneThrough" || rel.type === "hasManyThrough") {
+        result = await this.applyThroughRelation(result, key, rel);
       } else {
-        // Direct relations: hasOne, hasMany, belongsTo, belongsToMany
-        const directRel = rel as Extract<
-          typeof rel,
-          { localKey: string; foreignKey: string; type?: string }
-        >;
-
-        let foreignData: any[] = [];
-
-        if (
-          directRel.type === "belongsTo" ||
-          directRel.type === "belongsToMany"
-        ) {
-          // For belongsTo and belongsToMany, use foreignKey-based filtering
-          const allLocalVals = result.flatMap((row) =>
-            getAllFieldValues(row, directRel.localKey)
-          );
-
-          const slugs = await this.getMatchedSlugsFromIndexFilters(
-            directRel.to,
-            [{ field: directRel.foreignKey, op: "in", value: allLocalVals }],
-            this.resolver.resolveOne(directRel.to)
-          );
-
-          const uniqueSlugs = slugs ? Array.from(new Set(slugs)) : [];
-          foreignData = await this.loader.loadBySlugs(
-            directRel.to,
-            uniqueSlugs
-          );
-        } else {
-          // For hasOne and hasMany, localKey values are treated as slugs
-          const allSlugs = result.flatMap((row) =>
-            getAllFieldValues(row, directRel.localKey)
-          );
-          const uniqueSlugs = Array.from(new Set(allSlugs));
-          foreignData = await this.loader.loadBySlugs(
-            directRel.to,
-            uniqueSlugs
-          );
-        }
-
-        result = result.map((row) => {
-          if (
-            directRel.type === "belongsTo" ||
-            directRel.type === "belongsToMany"
-          ) {
-            // Inverse lookup: match localKey values to foreignKey values
-            const localVals = getAllFieldValues(row, directRel.localKey);
-            const related = foreignData.filter((targetRow) => {
-              const foreignVals = getAllFieldValues(
-                targetRow,
-                directRel.foreignKey
-              );
-              return localVals.some((val) => foreignVals.includes(val));
-            });
-            return { ...row, [key]: related };
-          } else {
-            const relValue = resolveDirectRelation(row, directRel, foreignData);
-            return {
-              ...row,
-              [key]:
-                directRel.type === "hasOne" ? relValue ?? null : relValue ?? [],
-            };
-          }
-        });
+        result = await this.applyDirectRelation(result, key, rel);
       }
     }
 
@@ -333,104 +231,200 @@ export class QueryBuilder<T> {
   }
 
   /**
-   * Applies in-memory filters that could not be satisfied via index.
+   * Direct relations: hasOne, hasMany, belongsTo, belongsToMany
    */
-  private applyFallbackFilters(result: T[], fallbackFilters: Filter[]): T[] {
-    for (const filter of fallbackFilters) {
-      const { field, op, value } = filter;
+  private async applyDirectRelation(
+    result: T[],
+    key: string,
+    rel: any
+  ): Promise<T[]> {
+    const directRel = rel as Extract<
+      typeof rel,
+      { localKey: string; foreignKey: string; type?: string }
+    >;
 
-      result = result.filter((row) => {
-        const vals = getAllFieldValues(row, field);
-        if (vals.length === 0) return false;
-        if (op === "eq") return vals[0] === value;
-        if (op === "contains") return vals.some((v) => v.includes(value));
-        if (op === "in" && Array.isArray(value))
-          return vals.some((v) => value.includes(v));
-        return false;
-      });
+    let foreignData: any[] = [];
+
+    if (directRel.type === "belongsTo" || directRel.type === "belongsToMany") {
+      // For belongsTo and belongsToMany, use foreignKey-based filtering
+      const allLocalVals = result.flatMap((row) =>
+        resolveField(row, directRel.localKey)
+      );
+
+      const uniqueIndexes =
+        (await this.getMatchedIndexes(
+          directRel.to,
+          [{ field: directRel.foreignKey, op: "in", value: allLocalVals }],
+          this.resolver.resolveOne(directRel.to)
+        )) ?? [];
+
+      foreignData = await this.loader.loadBySlugs(
+        directRel.to,
+        uniqueIndexes.map((index) => Object.keys(index.r)).flat()
+      );
+    } else {
+      // For hasOne and hasMany, localKey values are treated as slugs
+      const allSlugs = result.flatMap((row) =>
+        resolveField(row, directRel.localKey)
+      );
+      const uniqueSlugs = Array.from(new Set(allSlugs));
+      foreignData = await this.loader.loadBySlugs(directRel.to, uniqueSlugs);
     }
-    return result;
+
+    return result.map((row) => {
+      if (
+        directRel.type === "belongsTo" ||
+        directRel.type === "belongsToMany"
+      ) {
+        // Inverse lookup: match localKey values to foreignKey values
+        const localVals = resolveField(row, directRel.localKey);
+        const related = foreignData.filter((targetRow) => {
+          const foreignVals = resolveField(
+            targetRow,
+            directRel.foreignKey
+          );
+          return localVals.some((val) => foreignVals.includes(val));
+        });
+        return { ...row, [key]: related };
+      } else {
+        const relValue = resolveDirectRelation(row, directRel, foreignData);
+        return {
+          ...row,
+          [key]:
+            directRel.type === "hasOne" ? relValue ?? null : relValue ?? [],
+        };
+      }
+    });
+  }
+
+  /**
+   * For "hasOneThrough" and "hasManyThrough" relations
+   */
+  private async applyThroughRelation(
+    result: T[],
+    key: string,
+    rel: any
+  ): Promise<T[]> {
+    const sourceSlugs = result.flatMap((row) =>
+      resolveField(row, rel.sourceLocalKey)
+    );
+
+    // If the intermediate table doesn't use "slug", index-based lookup is required
+    const uniqueSourceIndexes =
+      (await this.getMatchedIndexes(
+        rel.through,
+        [
+          {
+            field: rel.throughForeignKey,
+            op: "in",
+            value: sourceSlugs,
+          },
+        ],
+        this.resolver.resolveOne(rel.through)
+      )) ?? [];
+
+    const throughData = await this.loader.loadBySlugs(
+      rel.through,
+      uniqueSourceIndexes.map((index) => Object.keys(index.r)).flat()
+    );
+
+    const targetSlugs = throughData.flatMap((t) =>
+      resolveField(t, rel.throughLocalKey)
+    );
+
+    // If the target table doesn't use "slug", index-based lookup is required
+    const uniqueTargetIndexes =
+      (await this.getMatchedIndexes(
+        rel.to,
+        [{ field: rel.targetForeignKey, op: "in", value: targetSlugs }],
+        this.resolver.resolveOne(rel.through)
+      )) ?? [];
+
+    const targetData = await this.loader.loadBySlugs(
+      rel.to,
+      uniqueTargetIndexes.map((index) => Object.keys(index.r)).flat()
+    );
+
+    return result.map((row) => {
+      const relValue = resolveThroughRelation(
+        row,
+        rel,
+        throughData,
+        targetData
+      );
+
+      return {
+        ...row,
+        [key]: rel.type === "hasOneThrough" ? relValue ?? null : relValue ?? [],
+      };
+    });
   }
 
   /**
    * Resolves matched slugs using index data based on filters.
    */
-  private async getMatchedSlugsFromIndexFilters(
+  private async getMatchedIndexes(
     sourceName: string,
     indexedFilters: Filter[],
     rsc: RSC
-  ): Promise<string[] | null> {
-    let indexSlugs: string[] | null = null;
+  ) {
+    let matched: PrefixIndexLine[] = [];
 
     for (const filter of indexedFilters) {
       const { field, op, value } = filter;
-      let matched: string[] = [];
 
-      if (field === "slug") {
-        matched.push(String(value));
-      } else if (Object.keys(rsc.indexes?.split ?? {}).length) {
-        // Split-index handling
-
+      if (Object.keys(rsc.indexes ?? {}).length) {
         if (op === "eq") {
-          const keyValue = String(value);
-          matched =
-            (await this.indexer.getSplitIndex(sourceName, field, keyValue)) ??
-            [];
+          const matchedIndex = await this.indexer.findIndexLines(
+            sourceName,
+            field,
+            String(value)
+          );
+
+          if (matchedIndex) matched.push(...matchedIndex);
+        } else if (op === "startsWith") {
+          const matchedIndex = await this.indexer.findIndexLines(
+            sourceName,
+            field,
+            String(value),
+            (indexValue, argValue) => indexValue.startsWith(argValue)
+          );
+
+          if (matchedIndex) matched.push(...matchedIndex);
         } else if (op === "in" && Array.isArray(value)) {
           for (const keyValue of value) {
-            matched.push(
-              ...((await this.indexer.getSplitIndex(
-                sourceName,
-                field,
-                keyValue
-              )) ?? [])
-            );
-          }
-        } else if (op === "contains") {
-          const indexPaths = await this.indexer.getSplitIndexPaths(
-            sourceName,
-            field
-          );
-          for (const path of indexPaths) {
-            const key = path.replace(/^.*\//, "").replace(/\.json$/, "");
-            if (key.includes(String(value))) {
-              matched.push(
-                ...((await this.indexer.getSplitIndex(
-                  sourceName,
-                  field,
-                  key
-                )) ?? [])
-              );
-            }
-          }
-        }
-      } else {
-        // Single-index handling
-        if (op === "eq") {
-          matched =
-            (await this.indexer.getFieldIndex(
+            const matchedIndex = await this.indexer.findIndexLines(
               sourceName,
               field,
-              String(value)
-            )) ?? [];
-        } else if (op === "in" && Array.isArray(value)) {
-          const indexMap =
-            (await this.indexer.getFieldIndexes(sourceName, field)) ?? {};
-          matched = value.flatMap((v) => indexMap![String(v)] ?? []);
-        } else if (op === "contains") {
-          const indexMap: string[] =
-            (await this.indexer.getFieldIndexes(sourceName, field)) ?? {};
-          matched = Object.entries(indexMap)
-            .filter(([k]) => k.includes(String(value)))
-            .flatMap(([, slugs]) => slugs);
+              String(keyValue)
+            );
+
+            if (matchedIndex) matched.push(...matchedIndex);
+          }
         }
       }
-
-      indexSlugs = indexSlugs
-        ? indexSlugs.filter((slug) => matched.includes(slug))
-        : matched;
     }
 
-    return indexSlugs?.length ? indexSlugs : null;
+    // no conditions
+    if (!matched.length && !indexedFilters.length && !this.filters.length) {
+      matched = await this.indexer.readAllIndexes(rsc.indexes!["slug"].dir);
+    }
+
+    matched.sort((a, b) => {
+      const [, avs] = Object.entries(a.r)[0];
+      const [, bvs] = Object.entries(b.r)[0];
+      const av = String(avs[String(this._orderByKey)]);
+      const bv = String(bvs[String(this._orderByKey)]);
+      const aEmpty = av == null || av === "";
+      const bEmpty = bv == null || bv === "";
+      if (aEmpty || bEmpty) {
+        throw new Error("orderby need index");
+      }
+      return this._orderByDirection
+        ? bv.localeCompare(av)
+        : av.localeCompare(bv);
+    });
+
+    return matched?.length ? matched : null;
   }
 }

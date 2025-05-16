@@ -59,28 +59,15 @@ export class FetchRepository implements StorageRepository {
    */
   async listFiles(pattern: string): Promise<string[]> {
     const allRSCs = this.resolver?.resolveAll() ?? [];
-    const rsc = allRSCs.find((r) =>
-      pattern.startsWith(r.indexes?.all ?? r.pattern)
-    );
+    const rsc = allRSCs.find((r) => pattern.startsWith(r.pattern));
     if (!rsc) return [];
 
-    if (rsc.indexes?.split) {
-      for (const [field, prefix] of Object.entries(rsc.indexes.split)) {
-        if (pattern.startsWith(prefix)) {
-          const metaUrl = this.baseUrl + `${prefix}_meta.json`;
-          const res = await fetch(metaUrl);
-          if (!res.ok) return [];
-          const keys: string[] = await res.json();
-          return keys.map((key) => `${prefix}${key}.json`);
-        }
-      }
-    }
+    const indexDir = `index/${rsc.name}.slug`;
+    const prefixIndexLines = await this.readAllIndexesRemote(indexDir);
+    const slugs = prefixIndexLines.map((line) => line.v).filter(Boolean);
+    const paths = slugs.map((slug) => rsc.pattern.replace("*", slug));
 
-    const slugs: string[] = rsc.indexes?.all
-      ? await this.fetchIndexFile(rsc.indexes.all)
-      : [];
-
-    return Resolver.getSourcePathsBySlugs(pattern, slugs);
+    return paths;
   }
 
   /**
@@ -98,6 +85,13 @@ export class FetchRepository implements StorageRepository {
   }
 
   /**
+   * Not supported in browser.
+   */
+  async removeDir(path: string): Promise<void> {
+    throw new Error("removeFile is not supported in browser environment");
+  }
+
+  /**
    * Internal helper to fetch a JSON index file (typically a list of slugs).
    *
    * @param indexPath - Relative or absolute path to index file.
@@ -111,5 +105,78 @@ export class FetchRepository implements StorageRepository {
     const res = await fetch(url);
     if (!res.ok) return [];
     return await res.json();
+  }
+
+  /**
+   * Opens a file as a ReadableStream.
+   *
+   * @param path - Relative path to the file (from the repository base directory)
+   * @returns Promise that resolves to a ReadableStream for the file contents
+   */
+  async openFileStream(path: string): Promise<ReadableStream> {
+    const res = await fetch(`${this.baseUrl}${path}`);
+    if (!res.ok) throw new Error(`Failed to fetch ${path}`);
+    return res.body!;
+  }
+
+  /**
+   * Remote (fetch-based) version of recursive prefix index traversal.
+   */
+  private async readAllIndexesRemote(dir: string): Promise<any[]> {
+    const results = [];
+
+    try {
+      const indexUrl = this.baseUrl + dir + "/_index.jsonl";
+      const indexRes = await fetch(indexUrl);
+      if (indexRes.ok) {
+        const indexData = await indexRes.text();
+        const flattened = this.flatPrefixIndexLine(
+          indexData
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .map((line) => JSON.parse(line))
+        );
+        results.push(...flattened);
+      }
+    } catch {}
+
+    try {
+      const prefixesUrl = this.baseUrl + dir + "/_prefixes.jsonl";
+      const prefixesRes = await fetch(prefixesUrl);
+      if (prefixesRes.ok) {
+        const prefixesData = await prefixesRes.text();
+        const prefixes = prefixesData
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean);
+        for (const prefix of prefixes) {
+          const subdir = dir + "/" + prefix;
+          const subResults = await this.readAllIndexesRemote(subdir);
+          results.push(...subResults);
+        }
+      }
+    } catch {}
+
+    return results;
+  }
+
+  private flatPrefixIndexLine(unflattened: any[]) {
+    const seen = new Set<string>();
+    const flattened = [];
+
+    for (const item of unflattened) {
+      for (const [key, value] of Object.entries(item.r)) {
+        if (!seen.has(key)) {
+          seen.add(key);
+          flattened.push({
+            v: item.v,
+            vs: item.vs,
+            r: { [key]: value },
+          });
+        }
+      }
+    }
+    return flattened;
   }
 }

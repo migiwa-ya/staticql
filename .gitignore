@@ -13,4 +13,4 @@ dist/
 # tests
 /tests/staticql-types.d.ts
 /tests/index
-/sample
+/sample*

@@ -1,4 +1,5 @@
 import { Indexer } from "./Indexer.js";
+import { PrefixIndexDefinition, PrefixIndexDepth } from "./utils/typs.js";
 import { JSONSchema7 } from "./validator/Validator.js";
 
 /**
@@ -6,6 +7,7 @@ import { JSONSchema7 } from "./validator/Validator.js";
  */
 export type SourceRecord = {
   slug: string;
+  [key: string]: any;
 };
 
 /**
@@ -21,7 +23,7 @@ export interface SourceConfig {
   pattern: string;
   schema: JSONSchema7;
   relations?: Record<string, Relation>;
-  index?: string[];
+  index?: string[] | PrefixIndexDepth;
   splitIndexByKey?: boolean;
 }
 
@@ -34,11 +36,7 @@ export interface ResolvedSourceConfig {
   pattern: string;
   schema: JSONSchema7;
   relations?: Record<string, Relation>;
-  indexes?: {
-    fields?: Record<string, string>;
-    split?: Record<string, string>;
-    all?: string;
-  };
+  indexes?: PrefixIndexDefinition;
 }
 
 /**
@@ -79,6 +77,8 @@ export class SourceConfigResolver {
 
   /**
    * Resolves all sources and returns the enriched configurations.
+   *
+   * @returns
    */
   resolveAll(): ResolvedSourceConfig[] {
     if (Object.values(this.cache).length !== 0) {
@@ -108,21 +108,27 @@ export class SourceConfigResolver {
     if (!source) throw new Error(`Source not found: ${sourceName}`);
 
     const indexes: ResolvedSourceConfig["indexes"] = {
-      fields: {},
-      split: {},
-      all: Indexer.getSlugIndexFilePath(sourceName),
+      slug: {
+        dir: Indexer.getIndexDir(sourceName, "slug"),
+        depth: Indexer.indexDepth,
+      },
     };
 
     if (Array.isArray(source.index)) {
       for (const field of source.index) {
-        if (source.splitIndexByKey) {
-          indexes.split![field] = Indexer.getSplitIndexDir(sourceName, field);
-        } else {
-          indexes.fields![field] = Indexer.getFieldIndexFilePath(
-            sourceName,
-            field
-          );
-        }
+        const fieldName =
+          typeof field === "object" ? Object.keys(field)[0] : field;
+        const depth =
+          typeof field === "object"
+            ? field[fieldName]["indexDepth"] ?? Indexer.indexDepth
+            : Indexer.indexDepth;
+
+        if (!this.isDepthInRange(depth)) throw new Error("");
+
+        indexes[fieldName] = {
+          dir: Indexer.getIndexDir(sourceName, fieldName),
+          depth,
+        };
       }
     }
 
@@ -139,8 +145,8 @@ export class SourceConfigResolver {
       .filter((e): e is [string, Relation] => !!e);
 
     if (relationalSources) {
-      for (const [relKey, rel] of relationalSources) {
-        let field: string | null = null;
+      for (const [_, rel] of relationalSources) {
+        let fieldName: string | null = null;
 
         if (
           rel.type === "belongsTo" ||
@@ -148,29 +154,26 @@ export class SourceConfigResolver {
           rel.type === "hasOne" ||
           rel.type === "hasMany"
         ) {
-          field = rel.foreignKey === "slug" ? null : rel.foreignKey;
+          fieldName = rel.foreignKey === "slug" ? null : rel.foreignKey;
         } else if (
           rel.type === "hasOneThrough" ||
           rel.type === "hasManyThrough"
         ) {
           if (rel.to === sourceName) {
-            field =
+            fieldName =
               rel.targetForeignKey === "slug" ? null : rel.targetForeignKey;
           } else {
-            field = rel.throughLocalKey === "slug" ? null : rel.throughLocalKey;
+            fieldName =
+              rel.throughLocalKey === "slug" ? null : rel.throughLocalKey;
           }
         }
 
-        if (!field) continue;
+        if (!fieldName) continue;
 
-        if (source.splitIndexByKey) {
-          indexes.split![field] = Indexer.getSplitIndexDir(sourceName, field);
-        } else {
-          indexes.fields![field] = Indexer.getFieldIndexFilePath(
-            sourceName,
-            field
-          );
-        }
+        indexes[fieldName] = {
+          dir: Indexer.getIndexDir(sourceName, fieldName),
+          depth: Indexer.indexDepth,
+        };
       }
     }
 
@@ -190,6 +193,9 @@ export class SourceConfigResolver {
 
   /**
    * Determines whether a relation is a through (indirect) relation.
+   * 
+   * @param rel 
+   * @returns 
    */
   isThroughRelation(rel: Relation): rel is ThroughRelation {
     return (
@@ -197,6 +203,13 @@ export class SourceConfigResolver {
       "through" in rel &&
       (rel.type === "hasOneThrough" || rel.type === "hasManyThrough")
     );
+  }
+
+  /**
+   * Check depth in range.
+   */
+  private isDepthInRange(n: number): n is PrefixIndexDepth {
+    return n >= 2 && n <= 10;
   }
 
   /**

@@ -1,6 +1,8 @@
 import { promises as fs } from "fs";
+import { createReadStream } from "node:fs";
 import * as path from "path";
 import { StorageRepository } from "./StorageRepository";
+import { Readable } from "node:stream";
 
 /**
  * FsRepository: StorageRepository implementation for the local file system.
@@ -38,6 +40,18 @@ export class FsRepository implements StorageRepository {
   async readFile(filePath: string): Promise<string> {
     const abs = path.resolve(this.baseDir, filePath);
     return await fs.readFile(abs, "utf-8");
+  }
+
+  /*
+   * Opens a file as a ReadableStream.
+   *
+   * @param path - Relative path to the file (from the repository base directory)
+   * @returns Promise that resolves to a ReadableStream for the file contents
+   */
+  async openFileStream(path: string): Promise<ReadableStream> {
+    const fullPath = [this.baseDir, path].join("/");
+    const stream = createReadStream(fullPath);
+    return Readable.toWeb(stream) as ReadableStream;
   }
 
   /**
@@ -106,5 +120,16 @@ export class FsRepository implements StorageRepository {
   async removeFile(filePath: string): Promise<void> {
     const abs = path.resolve(this.baseDir, filePath);
     await fs.unlink(abs);
+  }
+
+  /**
+   * Deletes the directory recursive.
+   *
+   * @param filePath - Relative path to the file.
+   */
+  async removeDir(filePath: string): Promise<void> {
+    const abs = path.resolve(this.baseDir, filePath);
+    if (!(await this.exists(abs))) return;
+    await fs.rm(abs, { recursive: true });
   }
 }

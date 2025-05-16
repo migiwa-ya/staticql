@@ -1,4 +1,11 @@
-import { getAllFieldValues, resolveField } from "./field.js";
+import { DirectRelationMap, ThroughRelationMap } from "../Indexer.js";
+import {
+  DirectRelation,
+  SourceRecord,
+  ThroughRelation,
+} from "../SourceConfigResolver.js";
+import { resolveField } from "./field.js";
+import { asArray } from "./normalize.js";
 
 /**
  * Builds a map from foreign key values to parent objects.
@@ -10,12 +17,12 @@ import { getAllFieldValues, resolveField } from "./field.js";
  * @returns A map of key to array of matching objects.
  */
 export function buildForeignKeyMap(
-  data: any[],
+  data: SourceRecord[],
   foreignKeyPath: string
-): Map<string, any[]> {
+): Map<string, SourceRecord[]> {
   const map = new Map<string, any[]>();
   for (const obj of data) {
-    const values = getAllFieldValues(obj, foreignKeyPath);
+    const values = resolveField(obj, foreignKeyPath);
     for (const v of values) {
       if (!map.has(v)) {
         map.set(v, []);
@@ -59,24 +66,25 @@ export function findEntriesByPartialKey<K extends string | undefined, V>(
  */
 export function resolveDirectRelation(
   row: any,
-  rel: any,
-  foreignData: any[],
-  foreignMapOpt?: Map<string, any[]>
+  rel: DirectRelation,
+  foreignData: SourceRecord[],
+  foreignMapOpt?: DirectRelationMap["foreignMap"]
 ): any {
   const foreignMap =
     foreignMapOpt ?? buildForeignKeyMap(foreignData, rel.foreignKey);
   const relType = rel.type;
-  const localVal = (resolveField(row, rel.localKey) ?? "") as string;
-  const keys = localVal.split(" ").filter(Boolean);
+  const localKeys = resolveField(row, rel.localKey)
+    .filter((v): v is string => !!v)
+    .flat();
 
   let matches: any[] = [];
-  if (rel.exactMatch || keys.length === 1) {
-    for (const k of keys) {
+  if (localKeys.length === 1) {
+    for (const k of localKeys) {
       const arr = foreignMap.get(k);
       if (arr) matches.push(...arr);
     }
   } else {
-    matches = keys
+    matches = localKeys
       .map((k: string) => findEntriesByPartialKey(foreignMap, k))
       .flat()
       .filter((v: any) => v);
@@ -85,7 +93,7 @@ export function resolveDirectRelation(
   if (relType === "hasOne") {
     return matches.length > 0 ? matches[0] : null;
   } else {
-    return matches.flat();
+    return matches;
   }
 }
 
@@ -101,32 +109,42 @@ export function resolveDirectRelation(
  */
 export function resolveThroughRelation(
   row: any,
-  rel: any,
-  throughData: any[],
-  targetData: any[],
-  targetMapOpt?: Map<string, any>
+  rel: ThroughRelation,
+  throughData: SourceRecord[],
+  targetData: SourceRecord[],
+  targetMapOpt?: ThroughRelationMap["targetMap"]
 ): any {
-  const sourceKey = (resolveField(row, rel.sourceLocalKey) ?? "") as string;
-  const throughMatches = throughData.filter((t: any) =>
-    ((resolveField(t, rel.throughForeignKey) ?? "") as string)
-      .split(" ")
-      .includes(sourceKey)
-  );
+  const sourceKeys = resolveField(row, rel.sourceLocalKey).flat();
 
-  const targetMap =
-    targetMapOpt ??
-    new Map<string, any>(
-      targetData.map((r: any) => [
-        resolveField(r, rel.targetForeignKey) ?? "",
-        r,
-      ])
+  const throughMatches = throughData.filter((t: any) => {
+    const throughForeignKeys = resolveField(t, rel.throughForeignKey);
+    return sourceKeys.some((sourceKey) =>
+      throughForeignKeys.includes(sourceKey)
     );
+  });
+
+  let targetMap = targetMapOpt
+    ? targetMapOpt
+    : (() => {
+        const map: ThroughRelationMap["targetMap"] = new Map();
+        for (const item of targetData) {
+          const keys = resolveField(item, rel.targetForeignKey)
+            .filter((v): v is string => !!v)
+            .flat();
+          for (const key of keys) {
+            if (key) map.set(key, [item]);
+          }
+        }
+
+        return map;
+      })();
 
   const targets = throughMatches
     .map((t: any) => {
-      const throughKey = (resolveField(t, rel.throughLocalKey) ?? "") as string;
-      return throughKey
-        .split(" ")
+      const throughLocalKeys = resolveField(t, rel.throughLocalKey)
+        .filter((v): v is string => !!v)
+        .flat();
+      return throughLocalKeys
         .map((k: string) => targetMap.get(k))
         .filter((v: any) => v);
     })
