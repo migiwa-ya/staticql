@@ -24,8 +24,7 @@ export interface SourceConfig {
   pattern: string;
   schema: JSONSchema7;
   relations?: Record<string, Relation>;
-  index?: string[] | PrefixIndexDepth;
-  splitIndexByKey?: boolean;
+  index?: (string | { [field: string]: { indexDepth: PrefixIndexDepth } })[];
 }
 
 /**

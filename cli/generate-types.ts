@@ -113,11 +113,21 @@ function generateTypeDefs(config: any): string {
     const explicitIndexFields = new Set<string>();
     if (sourceDef.index) {
       for (const field of sourceDef.index) {
-        explicitIndexFields.add(field);
-        const safeField = field.replace(/\W/g, "_");
-        typeDefs += `export type ${capitalize(
-          sourceName
-        )}Index_${safeField} = Record<string, string[]>;\n\n`;
+        if (typeof field === "string") {
+          explicitIndexFields.add(field);
+          const safeField = field.replace(/\W/g, "_");
+          typeDefs += `export type ${capitalize(
+            sourceName
+          )}Index_${safeField} = Record<string, string[]>;\n\n`;
+        } else if (typeof field === "object" && field !== null) {
+          for (const [key, value] of Object.entries(field)) {
+            explicitIndexFields.add(key);
+            const safeField = key.replace(/\W/g, "_");
+            typeDefs += `export type ${capitalize(
+              sourceName
+            )}Index_${safeField} = Record<string, string[]>;\n\n`;
+          }
+        }
       }
     }
 
