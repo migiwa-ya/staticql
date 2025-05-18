@@ -3,7 +3,7 @@ import { createReadStream } from "node:fs";
 import * as path from "path";
 import { StorageRepository } from "./StorageRepository";
 import { Readable } from "node:stream";
-import { joinPath } from "../utils/path";
+import { joinPath } from "../utils/path.js";
 
 /**
  * FsRepository: StorageRepository implementation for the local file system.

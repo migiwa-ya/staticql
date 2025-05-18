@@ -1,6 +1,6 @@
 {
   "name": "staticql",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "type": "module",
   "main": "dist/src/index.js",
   "types": "./dist/src/index.d.ts",
@@ -11,15 +11,18 @@
     },
     "./repo/fs": {
       "node": "./dist/src/repository/FsRepository.js",
-      "default": "./dist/src/repository/FsRepository.js"
+      "default": "./dist/src/repository/FsRepository.js",
+      "types": "./dist/src/repository/FsRepository.d.ts"
     },
     "./repo/workers-r2": {
       "workerd": "./dist/src/repository/R2Repository.js",
-      "default": "./dist/src/repository/R2Repository.js"
+      "default": "./dist/src/repository/R2Repository.js",
+      "types": "./dist/src/repository/R2Repository.d.ts"
     },
     "./repo/fetch": {
       "import": "./dist/src/repository/FetchRepository.js",
-      "default": "./dist/src/repository/FetchRepository.js"
+      "default": "./dist/src/repository/FetchRepository.js",
+      "types": "./dist/src/repository/FetchRepository.d.ts"
     },
     "./types": {
       "types": "./dist/src/types.d.ts"

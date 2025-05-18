@@ -1,6 +1,6 @@
 import { SourceConfigResolver as Resolver } from "../SourceConfigResolver";
-import { parsePrefixDict } from "../utils/normalize";
-import { joinPath, toI, toP } from "../utils/path";
+import { parsePrefixDict } from "../utils/normalize.js";
+import { joinPath, toI, toP } from "../utils/path.js";
 import type { StorageRepository } from "./StorageRepository";
 
 /**

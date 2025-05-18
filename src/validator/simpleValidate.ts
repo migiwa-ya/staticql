@@ -83,7 +83,11 @@ export function simpleValidate(
         if (actualType === "boolean") valid = true;
         break;
       case "date":
-        if (typeof data === "string" && !isNaN(Date.parse(data))) valid = true;
+        if (
+          (typeof data === "string" || typeof data === "object") &&
+          !isNaN(Date.parse(data))
+        )
+          valid = true;
         break;
       case "null":
         // already handled

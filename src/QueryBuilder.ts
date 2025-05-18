@@ -147,6 +147,16 @@ export class QueryBuilder<T extends SourceRecord> {
     const requiresJoin = this.joins.length > 0;
     const orderByKey = String(this._orderByKey);
 
+    const empty = {
+      data: [],
+      pageInfo: {
+        hasNextPage: false,
+        hasPreviousPage: false,
+        startCursor: undefined,
+        endCursor: undefined,
+      },
+    };
+
     let matched = await this.getMatchedIndexes(this.sourceName, filters, rsc);
 
     let page: PrefixIndexLine[];
@@ -216,6 +226,8 @@ export class QueryBuilder<T extends SourceRecord> {
         page = data.reverse();
       }
 
+      if (!page.length) return empty;
+
       // set hasPreviousPage
       const fv = Object.values(page[0].r);
       const fp = joinPath(indexDir, fv[0][orderByKey][0]);
@@ -241,15 +253,7 @@ export class QueryBuilder<T extends SourceRecord> {
         endCursor: encodeCursorCallback(page[page.length - 1]),
       };
     } else {
-      return {
-        data: [],
-        pageInfo: {
-          hasNextPage: false,
-          hasPreviousPage: false,
-          startCursor: undefined,
-          endCursor: undefined,
-        },
-      };
+      return empty;
     }
 
     const slugs = page.flatMap((x) => Object.keys(x.r));
