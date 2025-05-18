@@ -1,14 +1,13 @@
-# staticql
+# StaticQL
 
 StaticQL（Static File Query Layer） は、Markdown / YAML / JSON の静的ファイルをそのまま結合・検索できる軽量な静的データレイヤーです。型定義ベースで型推論が効くクエリを、TypeScript の標準構文で記述できます。小〜中規模の Jamstack や API での利用を想定していますが、幅広い場面での活用を目指しています。
 
 ## 特長
 
 - JSON Schema によるソース定義と簡易バリデーション
-- 型推論が効く SQL ライクなクエリ（where / join）
+- 型推論つき cursor ベースクエリ（where: eq, in, startsWith / join / orderBy / 双方向ページネーション）
 - インデックスファイルの生成と活用による高速検索
 - Node.js / ブラウザ / Cloudflare Workers に対応
-- プラガブルなストレージ設計（fs, fetch, Workers の R2 など）
 - 定義ファイルとコンテンツ、インデックスの公開で Web UI でも利用可能
 
 ## インストール
@@ -47,8 +46,6 @@ const factory = defineStaticQL({
       },
       // インデックスを生成するキー
       index: ["name"],
-      // インデックスファイルをキーごとに分割
-      splitIndexByKey: true,
     },
   },
 });
@@ -58,7 +55,14 @@ const staticql = factory({ repository: new FsRepository("tests/") });
 
 const result = await staticql
   .from<HerbsRecord>("herbs")
+  .join("tags")
+  .join("recipes")
   .where("name", "eq", "ラベンダー")
+  .orderBy("name", "asc")
+  .cursor(
+    "eyJvcmRlciI6eyJuYW1lIjoiOGFjZi84YTJhIn0sInNsdWciOiJiZjk4ZDYxOS02Y2FhLTRlMDItOGMyMy00ZmFmMDE2OTMyZDAifQ==",
+    "before"
+  )
   .exec();
 
 console.log(result);
@@ -97,27 +101,19 @@ npx staticql-gen-index ./staticql.config.json ./public/index/ --incremental --di
 
 #### 差分情報フォーマット
 
-差分情報は、git diff などから整形しやすい JSON 形式で受け渡します。  
+差分情報は JSON 形式で受け渡します。  
 1 行ごとに 1 ファイルの差分を表現し、以下のような配列とします。
 
 ```json
 [
-  { "status": "A", "path": "content/foo.md" },
-  { "status": "M", "path": "content/bar.md" },
-  { "status": "D", "path": "content/baz.md" },
-  { "status": "R", "path": "content/new.md", "oldPath": "content/old.md" }
+  { "status": "A", "source": "herbs", "slug": "xxx" }
+  { "status": "D", "source": "recipes", "slug": "yyy" }
 ]
 ```
 
-- status: "A"=追加, "M"=変更, "D"=削除, "R"=リネーム
-- path: 追加/変更後のパス
-- oldPath: リネーム時の元パス
-
-### 差分情報の生成例
-
-```sh
-git diff --name-status $BASE_SHA $HEAD_SHA | awk '{ if ($1 == "R100") print "{\"status\":\"R\",\"path\":\""$3"\",\"oldPath\":\""$2"\"}"; else if ($1 == "A" || $1 == "M" || $1 == "D") print "{\"status\":\""$1"\",\"path\":\""$2"\"}"; }' | jq -s . > diff.json
-```
+- `status`: "A"=追加, "D"=削除
+- `source`: 更新対象ソース名
+- `slug`: 更新対象の slug
 
 ## リレーションの定義と利用（Join）
 
@@ -216,15 +212,14 @@ herbPartSlug: leaf
 ### クエリ例
 
 ```ts
-import { defineStaticQL } from "staticql";
+import { defineStaticQL, StaticQLConfig } from "staticql";
 import { FsRepository } from "staticql/repo/fs";
 import { HerbsRecord } from "./staticql-types";
 
-const factory = defineStaticQL({
-  sources: {
-    // ...（前述の定義ファイルに準拠）
-  },
-});
+const raw = await fetch("http://127.0.0.1:8080/staticql.config.json");
+const config = await raw.json();
+
+const factory = defineStaticQL(config as StaticQLConfig);
 
 const staticql = factory({
   repository: new FsRepository("tests/"),
@@ -232,26 +227,32 @@ const staticql = factory({
 
 const result = await staticql
   .from<HerbsRecord>("herbs")
-  .join("tags")
-  .join("recipes")
-  .where("name", "eq", "ペパーミント")
+  .where("name", "startsWith", "カモミール")
+  .orderBy("name", "asc")
+  .cursor(
+    "eyJvcmRlciI6eyJuYW1lIjoiOGFjZi84YTJhIn0sInNsdWciOiJiZjk4ZDYxOS02Y2FhLTRlMDItOGMyMy00ZmFmMDE2OTMyZDAifQ==",
+    "before"
+  )
+  .pageSize(5)
   .exec();
 
 console.log(result);
 /*
-[
-  {
-    slug: 'peppermint',
-    name: 'ペパーミント',
-    tags: [
-      { slug: 'relax', name: 'リラックス' },
-      { slug: 'digest', name: '消化' }
-    ],
-    recipes: [
-      { slug: 'mint-tea', title: 'ミントティー', recipeGroupSlug: 'grp01' }
-    ]
+{
+  data: [
+    { id: 'bf98d619-6caa-4e02-8c23-4faf016932d0', name: 'カモミール・ローマン' },
+    { id: 'd817025c-9254-4c4a-b167-3dbf056b9bad', name: 'カモミール・ジャーマン' },
+    { id: 'a5de8a6e-80ad-4521-8260-b2e91d678841', name: 'カモミール・ワイルド' },
+    { id: 'fdd52178-4f99-443a-bef3-52eb10b32dd6', name: 'カモミール・エジプト' },
+    { id: '07dec3ee-7646-492e-95f6-18c46ae133b7', name: 'カモミール・ブルガリア' }
+  ],
+  pageInfo: {
+    hasNextPage: true,
+    hasPreviousPage: false,
+    startCursor: 'eyJvcmRlciI6eyJuYW1lIjoiOGFjZi84YTJhIn0sInNsdWciOiJiZjk4ZDYxOS02Y2FhLTRlMDItOGMyMy00ZmFmMDE2OTMyZDAifQ==',
+    endCursor: 'eyJvcmRlciI6eyJuYW1lIjoiOGFjZi84YTJhIn0sInNsdWciOiIwN2RlYzNlZS03NjQ2LTQ5MmUtOTVmNi0xOGM0NmFlMTMzYjcifQ=='
   }
-]
+}
 */
 ```
 

@@ -1,4 +1,4 @@
-# staticql
+# StaticQL
 
 **StaticQL (Static File Query Layer)** is a lightweight static data layer that allows you to query and join Markdown / YAML / JSON files directly. Queries are written using standard TypeScript syntax with full type inference support. While designed for small to medium-sized Jamstack and API projects, StaticQL is flexible enough to be used in a wide variety of contexts.
 
@@ -7,10 +7,9 @@
 ## Features
 
 - JSON Schema-based source definitions with lightweight validation
-- SQL-like queries with type inference (`where` / `join`)
+- Type-safe, cursor-based queries (where: eq, in, startsWith / join / orderBy / bidirectional pagination)
 - Index file generation and usage for fast query performance
 - Supports Node.js, browser, and Cloudflare Workers
-- Pluggable storage layer (fs, fetch, Workers R2, etc.)
 - Works in Web UI by publishing schema, content, and index files
 
 ## Installation
@@ -40,7 +39,6 @@ const factory = defineStaticQL({
         required: ["name", "overview"],
       },
       index: ["name"],
-      splitIndexByKey: true,
     },
   },
 });
@@ -49,7 +47,14 @@ const staticql = factory({ repository: new FsRepository("tests/") });
 
 const result = await staticql
   .from<HerbsRecord>("herbs")
+  .join("tags")
+  .join("recipes")
   .where("name", "eq", "ラベンダー")
+  .orderBy("name", "asc")
+  .cursor(
+    "eyJvcmRlciI6eyJuYW1lIjoiOGFjZi84YTJhIn0sInNsdWciOiJiZjk4ZDYxOS02Y2FhLTRlMDItOGMyMy00ZmFmMDE2OTMyZDAifQ==",
+    "before"
+  )
   .exec();
 
 console.log(result);
@@ -83,26 +88,18 @@ npx staticql-gen-index ./staticql.config.json ./public/index/ --incremental --di
 
 #### Diff file format
 
-Diff input is passed as a JSON array, useful for parsing git changes:
+Diff input is passed as a JSON array:
 
 ```json
 [
-  { "status": "A", "path": "content/foo.md" },
-  { "status": "M", "path": "content/bar.md" },
-  { "status": "D", "path": "content/baz.md" },
-  { "status": "R", "path": "content/new.md", "oldPath": "content/old.md" }
+  { "status": "A", "source": "herbs", "slug": "xxx" }
+  { "status": "D", "source": "recipes", "slug": "yyy" }
 ]
 ```
 
-- `status`: `"A"` = added, `"M"` = modified, `"D"` = deleted, `"R"` = renamed
-- `path`: current file path
-- `oldPath`: original file path (for renamed files)
-
-### Example: generating diff file from git
-
-```sh
-git diff --name-status $BASE_SHA $HEAD_SHA | awk '{ if ($1 == "R100") print "{\"status\":\"R\",\"path\":\""$3"\",\"oldPath\":\""$2"\"}"; else if ($1 == "A" || $1 == "M" || $1 == "D") print "{\"status\":\""$1"\",\"path\":\""$2"\"}"; }' | jq -s . > diff.json
-```
+- `status`: `"A"` = added, `"D"` = deleted
+- `source`: Name of the updated source
+- `slug`: Slug of the updated item
 
 ## Defining and Using Relations (`join`)
 
@@ -195,15 +192,14 @@ herbPartSlug: leaf
 ### Query Example
 
 ```ts
-import { defineStaticQL } from "staticql";
+import { defineStaticQL, StaticQLConfig } from "staticql";
 import { FsRepository } from "staticql/repo/fs";
 import { HerbsRecord } from "./staticql-types";
 
-const factory = defineStaticQL({
-  sources: {
-    /* omitted */
-  },
-});
+const raw = await fetch("http://127.0.0.1:8080/staticql.config.json");
+const config = await raw.json();
+
+const factory = defineStaticQL(config as StaticQLConfig);
 
 const staticql = factory({
   repository: new FsRepository("tests/"),
@@ -211,26 +207,31 @@ const staticql = factory({
 
 const result = await staticql
   .from<HerbsRecord>("herbs")
-  .join("tags")
-  .join("recipes")
-  .where("name", "eq", "ペパーミント")
-  .exec();
+  .where("name", "startsWith", "カモミール")
+  .orderBy("name", "asc")
+  .cursor(
+    "eyJvcmRlciI6eyJuYW1lIjoiOGFjZi84YTJhIn0sInNsdWciOiJiZjk4ZDYxOS02Y2FhLTRlMDItOGMyMy00ZmFmMDE2OTMyZDAifQ==",
+    "before"
+  )
+  .pageSize(5)
 
 console.log(result);
 /*
-[
-  {
-    slug: 'peppermint',
-    name: 'ペパーミント',
-    tags: [
-      { slug: 'relax', name: 'リラックス' },
-      { slug: 'digest', name: '消化' }
-    ],
-    recipes: [
-      { slug: 'mint-tea', title: 'ミントティー', recipeGroupSlug: 'grp01' }
-    ]
+{
+  data: [
+    { id: 'bf98d619-6caa-4e02-8c23-4faf016932d0', name: 'カモミール・ローマン' },
+    { id: 'd817025c-9254-4c4a-b167-3dbf056b9bad', name: 'カモミール・ジャーマン' },
+    { id: 'a5de8a6e-80ad-4521-8260-b2e91d678841', name: 'カモミール・ワイルド' },
+    { id: 'fdd52178-4f99-443a-bef3-52eb10b32dd6', name: 'カモミール・エジプト' },
+    { id: '07dec3ee-7646-492e-95f6-18c46ae133b7', name: 'カモミール・ブルガリア' }
+  ],
+  pageInfo: {
+    hasNextPage: true,
+    hasPreviousPage: false,
+    startCursor: 'eyJvcmRlciI6eyJuYW1lIjoiOGFjZi84YTJhIn0sInNsdWciOiJiZjk4ZDYxOS02Y2FhLTRlMDItOGMyMy00ZmFmMDE2OTMyZDAifQ==',
+    endCursor: 'eyJvcmRlciI6eyJuYW1lIjoiOGFjZi84YTJhIn0sInNsdWciOiIwN2RlYzNlZS03NjQ2LTQ5MmUtOTVmNi0xOGM0NmFlMTMzYjcifQ=='
   }
-]
+}
 */
 ```
 
