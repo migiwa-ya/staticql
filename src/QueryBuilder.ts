@@ -13,12 +13,14 @@ import {
 import { LoggerProvider } from "./logger/LoggerProvider";
 import {
   createPageInfo,
+  CursorObject,
   decodeCursor,
   encodeCursor,
   getPageSlice,
   PageInfo,
 } from "./utils/pagenation.js";
 import { Fields, JoinableKeys, PrefixIndexLine } from "./utils/typs.js";
+import { joinPath } from "./utils/path.js";
 
 type Operator = "eq" | "startsWith" | "in";
 
@@ -39,7 +41,7 @@ export interface PageResult<T> {
 export class QueryBuilder<T extends SourceRecord> {
   private joins: string[] = [];
   private filters: Filter[] = [];
-  private _orderByKey?: Fields<T>;
+  private _orderByKey?: Fields<T> | "slug" = "slug";
   private _orderByDirection: OrderByDirection = "asc";
   private _cursorValue?: string;
   private _cursorDirection: "after" | "before" = "after";
@@ -139,38 +141,120 @@ export class QueryBuilder<T extends SourceRecord> {
    *
    * @returns Matched data records.
    */
-  async exec(): Promise<PageResult<T> | []> {
+  async exec(): Promise<PageResult<T>> {
     const rsc = this.resolver.resolveOne(this.sourceName);
     const filters = this.extractIndexFilters(rsc);
     const requiresJoin = this.joins.length > 0;
-    const orderByKey = this._orderByKey;
-    const hasLocalValue = rsc.schema?.properties?.[String(orderByKey)] != null;
+    const orderByKey = String(this._orderByKey);
 
     let matched = await this.getMatchedIndexes(this.sourceName, filters, rsc);
-    if (!matched) return [];
-    const total = matched.length;
 
-    const startIdx = this.getStartIdx(matched, this._cursorValue);
-    const page = getPageSlice(
-      matched,
-      startIdx,
-      this._pageSize,
-      this._cursorDirection
-    );
+    let page: PrefixIndexLine[];
+    let pageInfo: PageInfo;
+    const encodeCursorCallback = (item: PrefixIndexLine) => {
+      const refsLength = Object.keys(item.r).length;
+      const slug = Object.keys(item.r)[refsLength - 1];
+      const orderValue = Object.values(item.r)[refsLength - 1][orderByKey];
+
+      return encodeCursor({ order: { [orderByKey]: orderValue[0] }, slug });
+    };
+
+    if (matched.length) {
+      const cursorObj = this._cursorValue
+        ? decodeCursor(this._cursorValue)
+        : undefined;
+
+      const startIndex = this.getStartIdx(matched, cursorObj);
+
+      page = getPageSlice(
+        matched,
+        startIndex,
+        this._pageSize,
+        this._cursorDirection
+      );
+
+      pageInfo = createPageInfo(
+        page,
+        this._pageSize,
+        startIndex,
+        matched.length,
+        this._cursorDirection,
+        encodeCursorCallback
+      );
+    } else if (!matched.length && !filters.length) {
+      // no conditions
+
+      const indexDir = rsc.indexes![orderByKey].dir;
+      const isDesc = this._orderByDirection === "desc";
+      const isAfter = this._cursorDirection === "after";
+      let hasPreviousPage: boolean;
+      let hasNextPage: boolean;
+
+      if (isAfter) {
+        page = await Array.fromAsync(
+          this.indexer.readForwardPrefixIndexLines(
+            indexDir,
+            this._pageSize,
+            this._cursorValue,
+            orderByKey,
+            isDesc
+          )
+        );
+      } else {
+        const data = await Array.fromAsync(
+          this.indexer.readBackwardPrefixIndexLines(
+            indexDir,
+            this._pageSize,
+            this._cursorValue,
+            orderByKey,
+            isDesc
+          )
+        );
+
+        // In backward pagination, regardless of ascending or descending order,
+        // the retrieved data is ordered by the scan direction, so you need to reverse the results before returning them.
+        page = data.reverse();
+      }
+
+      // set hasPreviousPage
+      const fv = Object.values(page[0].r);
+      const fp = joinPath(indexDir, fv[0][orderByKey][0]);
+      const firstItemPoint = isDesc
+        ? this.indexer.walkPrefixIndexesDownword(fp)
+        : this.indexer.walkPrefixIndexesUpword(fp);
+      await firstItemPoint.next();
+      hasPreviousPage = !(await firstItemPoint.next()).done;
+
+      // set hasNextPage
+      const lv = Object.values(page[page.length - 1].r);
+      const lp = joinPath(indexDir, lv[lv.length - 1][orderByKey][0]);
+      const lastItemPoint = isDesc
+        ? this.indexer.walkPrefixIndexesUpword(lp)
+        : this.indexer.walkPrefixIndexesDownword(lp);
+      await lastItemPoint.next();
+      hasNextPage = !(await lastItemPoint.next()).done;
+
+      pageInfo = {
+        hasPreviousPage,
+        hasNextPage,
+        startCursor: encodeCursorCallback(page[0]),
+        endCursor: encodeCursorCallback(page[page.length - 1]),
+      };
+    } else {
+      return {
+        data: [],
+        pageInfo: {
+          hasNextPage: false,
+          hasPreviousPage: false,
+          startCursor: undefined,
+          endCursor: undefined,
+        },
+      };
+    }
 
     const slugs = page.flatMap((x) => Object.keys(x.r));
     let data = (await this.loader.loadBySlugs(this.sourceName, slugs)) as T[];
-    if (hasLocalValue && requiresJoin) data = await this.applyJoins(data, rsc);
-
-    const pageInfo = createPageInfo(
-      total,
-      page,
-      this._pageSize,
-      startIdx,
-      matched.length,
-      this._cursorDirection,
-      (item) => encodeCursor(Object.keys(item.r)[0])
-    );
+    if (requiresJoin) data = await this.applyJoins(data, rsc);
 
     return { data, pageInfo };
   }
@@ -180,11 +264,25 @@ export class QueryBuilder<T extends SourceRecord> {
    */
   private getStartIdx(
     matched: PrefixIndexLine[],
-    cursorValue?: string
+    cursorObj?: CursorObject
   ): number {
-    if (!cursorValue) return 0;
-    const slug = decodeCursor(cursorValue);
-    return matched.findIndex((x) => Object.keys(x.r).includes(slug));
+    if (!cursorObj) return 0;
+    const orderByKey = String(this._orderByKey);
+
+    return matched.findIndex((item) => {
+      for (const [slug, values] of Object.entries(item.r)) {
+        let match = slug === cursorObj.slug;
+
+        if (orderByKey && cursorObj.order[orderByKey]) {
+          const orderValue = values[orderByKey]?.[0];
+          match = match && orderValue === cursorObj.order[orderByKey];
+        }
+
+        return match;
+      }
+
+      return false;
+    });
   }
 
   /**
@@ -279,10 +377,7 @@ export class QueryBuilder<T extends SourceRecord> {
         // Inverse lookup: match localKey values to foreignKey values
         const localVals = resolveField(row, directRel.localKey);
         const related = foreignData.filter((targetRow) => {
-          const foreignVals = resolveField(
-            targetRow,
-            directRel.foreignKey
-          );
+          const foreignVals = resolveField(targetRow, directRel.foreignKey);
           return localVals.some((val) => foreignVals.includes(val));
         });
         return { ...row, [key]: related };
@@ -405,11 +500,6 @@ export class QueryBuilder<T extends SourceRecord> {
       }
     }
 
-    // no conditions
-    if (!matched.length && !indexedFilters.length && !this.filters.length) {
-      matched = await this.indexer.readAllIndexes(rsc.indexes!["slug"].dir);
-    }
-
     matched.sort((a, b) => {
       const [, avs] = Object.entries(a.r)[0];
       const [, bvs] = Object.entries(b.r)[0];
@@ -425,6 +515,6 @@ export class QueryBuilder<T extends SourceRecord> {
         : av.localeCompare(bv);
     });
 
-    return matched?.length ? matched : null;
+    return matched?.length ? matched : [];
   }
 }

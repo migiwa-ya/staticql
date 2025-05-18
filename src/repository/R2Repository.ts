@@ -86,9 +86,9 @@ export class R2Repository implements StorageRepository {
    * Writes data to the R2 bucket.
    *
    * @param path - Key to write.
-   * @param data - Content to write (string or Uint8Array).
+   * @param data - Content to write.
    */
-  async writeFile(path: string, data: Uint8Array | string): Promise<void> {
+  async writeFile(path: string, data: string): Promise<void> {
     const fullKey = this.buildKey(path);
     await this.bucket.put(fullKey, data);
   }

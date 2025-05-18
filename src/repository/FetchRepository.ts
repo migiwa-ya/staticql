@@ -1,4 +1,6 @@
 import { SourceConfigResolver as Resolver } from "../SourceConfigResolver";
+import { parsePrefixDict } from "../utils/normalize";
+import { joinPath, toI, toP } from "../utils/path";
 import type { StorageRepository } from "./StorageRepository";
 
 /**
@@ -126,7 +128,7 @@ export class FetchRepository implements StorageRepository {
     const results = [];
 
     try {
-      const indexUrl = this.baseUrl + dir + "/_index.jsonl";
+      const indexUrl = toI(this.baseUrl, dir);
       const indexRes = await fetch(indexUrl);
       if (indexRes.ok) {
         const indexData = await indexRes.text();
@@ -142,16 +144,13 @@ export class FetchRepository implements StorageRepository {
     } catch {}
 
     try {
-      const prefixesUrl = this.baseUrl + dir + "/_prefixes.jsonl";
+      const prefixesUrl = toP(this.baseUrl, dir);
       const prefixesRes = await fetch(prefixesUrl);
       if (prefixesRes.ok) {
         const prefixesData = await prefixesRes.text();
-        const prefixes = prefixesData
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(Boolean);
+        const prefixes = parsePrefixDict(prefixesData);
         for (const prefix of prefixes) {
-          const subdir = dir + "/" + prefix;
+          const subdir = joinPath(dir, prefix);
           const subResults = await this.readAllIndexesRemote(subdir);
           results.push(...subResults);
         }

@@ -14,12 +14,13 @@ import {
 import { StorageRepository } from "./repository/StorageRepository.js";
 import { SourceLoader } from "./SourceLoader";
 import { LoggerProvider } from "./logger/LoggerProvider";
-import { toParent } from "./utils/path.js";
-import { readJsonlStream } from "./utils/jsonl.js";
+import { joinPath, tail, toI, toP, toParent } from "./utils/path.js";
+import { readJsonlStream, readListStream } from "./utils/stream.js";
 import { mapSetToObject } from "./utils/normalize.js";
 import { PrefixIndexDepth, PrefixIndexLine } from "./utils/typs.js";
+import { decodeCursor } from "./utils/pagenation.js";
 
-// Represents a file diff entry (for incremental index updates).
+// represents a file diff entry (for incremental index updates).
 export type DiffEntry = { status: "A" | "D"; source: string; slug: string };
 // TODO: M, R statuses
 // | { status: "M"; source: string; slug: string; field: string }
@@ -34,7 +35,10 @@ type EntryGroup = Map<
 // Record<sourceName, {["foreignMap" | "targetMap"]: Map<value, SourceRecord[]>
 type RelationMaps = Record<string, DirectRelationMap | ThroughRelationMap>;
 export type DirectRelationMap = { foreignMap: Map<string, SourceRecord[]> };
-export type ThroughRelationMap = { targetMap: Map<string, SourceRecord[]> };
+export type ThroughRelationMap = {
+  targetMap: Map<string, SourceRecord[]>;
+  throughMap: Map<string, SourceRecord[]>;
+};
 
 /**
  * Indexer: core class for building and updating search indexes.
@@ -211,6 +215,10 @@ export class Indexer {
               [...dataMap.get(rel.to)!],
               rel.targetForeignKey
             ),
+            throughMap: buildForeignKeyMap(
+              [...dataMap.get(rel.through)!],
+              rel.throughForeignKey
+            ),
           };
         } else {
           if (!dataMap.get(rel.to)) {
@@ -272,7 +280,8 @@ export class Indexer {
               rel,
               [...dataMap.get(rel.through)!],
               [...dataMap.get(rel.to)!],
-              (relationMaps[key] as ThroughRelationMap).targetMap
+              (relationMaps[key] as ThroughRelationMap).targetMap,
+              (relationMaps[key] as ThroughRelationMap).throughMap
             );
           } else {
             result[key] = resolveDirectRelation(
@@ -364,7 +373,7 @@ export class Indexer {
             const existed = new Set(existsRaw.split("\n").map((raw) => raw));
 
             for (const prefixString of [...value]) {
-              const dir = toParent(path) + "/" + prefixString;
+              const dir = joinPath(toParent(path), prefixString);
               if (!(await this.repository.exists(dir))) {
                 if (existed.has(prefixString)) existed.delete(prefixString);
               }
@@ -384,40 +393,283 @@ export class Indexer {
   }
 
   /**
-   * Scan the index files under the specified directory and retrieve all PrefixIndexLine.
+   * Get PrefixIndexLines for next page.
    */
-  async readAllIndexes(dir: string): Promise<PrefixIndexLine[]> {
-    const results: PrefixIndexLine[] = [];
+  async *readForwardPrefixIndexLines(
+    rootDir: string,
+    pageSize: number = 20,
+    cursor?: string,
+    orderByKey: string = "slug",
+    isDesc: boolean = false
+  ) {
+    const cursorObject = cursor ? decodeCursor(cursor) : undefined;
+    const indexParentDir = cursorObject
+      ? joinPath(rootDir, cursorObject.order[orderByKey])
+      : isDesc
+      ? tail(await this.findLastIndexPath(rootDir)).base
+      : tail(await this.findFirstIndexPath(rootDir)).base;
 
-    try {
-      const indexPath = [dir, "_index.jsonl"].join("/");
-      const indexData: string = await this.repository.readFile(indexPath);
-      const flattened = this.flatPrefixIndexLine(
-        indexData
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(Boolean)
-          .map((line) => JSON.parse(line))
-      );
-      results.push(...flattened);
-    } catch {}
+    const targetSlug = cursorObject?.slug;
+    let count = 0;
+    let countable = !targetSlug;
 
-    try {
-      const prefixPath = [dir, "_prefixes.jsonl"].join("/");
-      const prefixData = await this.repository.readFile(prefixPath);
-      const prefixes = prefixData
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean);
+    const indexWalker = isDesc
+      ? this.walkPrefixIndexesUpword(indexParentDir)
+      : this.walkPrefixIndexesDownword(indexParentDir);
 
-      for (const prefix of prefixes) {
-        const subdir = [dir, prefix].join("/");
-        const subResults = await this.readAllIndexes(subdir);
-        results.push(...subResults);
+    for await (const indexPath of indexWalker) {
+      const stream = await this.repository.openFileStream(indexPath);
+      const reader = stream.getReader();
+      const decoder = new TextDecoder();
+
+      for await (const prefixIndexLine of readJsonlStream<PrefixIndexLine>(
+        reader,
+        decoder
+      )) {
+        if (!countable && targetSlug) {
+          if (Object.keys(prefixIndexLine.r).includes(targetSlug)) {
+            countable = true;
+            continue;
+          }
+        }
+
+        if (countable) {
+          yield prefixIndexLine;
+          ++count;
+          if (count >= pageSize) return;
+        }
       }
-    } catch {}
+    }
+  }
 
-    return results;
+  /**
+   * Get PrefixIndexLines for backward pagination.
+   */
+  async *readBackwardPrefixIndexLines(
+    rootDir: string,
+    pageSize: number = 20,
+    cursor?: string,
+    orderByKey: string = "slug",
+    isDesc: boolean = false
+  ) {
+    const cursorObject = cursor ? decodeCursor(cursor) : undefined;
+    const indexParentDir = cursorObject
+      ? joinPath(rootDir, cursorObject.order[orderByKey])
+      : isDesc
+      ? tail(await this.findFirstIndexPath(rootDir)).base
+      : tail(await this.findLastIndexPath(rootDir)).base;
+
+    const targetSlug = cursorObject?.slug;
+    let count = 0;
+    let countable = !targetSlug;
+
+    const indexWalker = isDesc
+      ? this.walkPrefixIndexesDownword(indexParentDir)
+      : this.walkPrefixIndexesUpword(indexParentDir);
+
+    for await (const indexPath of indexWalker) {
+      const stream = await this.repository.openFileStream(indexPath);
+      const reader = stream.getReader();
+      const decoder = new TextDecoder();
+      const buff: Set<PrefixIndexLine> = new Set();
+
+      // buffer for desc
+      for await (const prefixIndexLine of readJsonlStream<PrefixIndexLine>(
+        reader,
+        decoder
+      )) {
+        // index contents are fixed in ascending order,
+        // so they need to be collected once and put in descending order
+        buff.add(prefixIndexLine);
+      }
+
+      for (const prefixIndexLine of [...buff].reverse()) {
+        if (!countable && targetSlug) {
+          if (Object.keys(prefixIndexLine.r).includes(targetSlug)) {
+            countable = true;
+            continue;
+          }
+        }
+
+        if (countable) {
+          yield prefixIndexLine;
+          ++count;
+          if (count >= pageSize) return;
+        }
+      }
+    }
+  }
+
+  /**
+   * Get the first index of the specified directory.
+   */
+  private async findFirstIndexPath(dir: string): Promise<string> {
+    const prefixIndexPath = toP(dir);
+
+    if (!(await this.repository.exists(prefixIndexPath))) {
+      return toI(dir);
+    }
+
+    const stream = await this.repository.openFileStream(prefixIndexPath);
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+
+    const { value: prefix, done } = await readListStream(
+      reader,
+      decoder
+    ).next();
+
+    return this.findFirstIndexPath(joinPath(dir, prefix));
+  }
+
+  /**
+   * Get the index of the deepest level below the specified directory.
+   */
+  private async findLastIndexPath(dir: string): Promise<string> {
+    const prefixIndexPath = toP(dir);
+    let prefix: string = "";
+
+    if (!(await this.repository.exists(prefixIndexPath))) {
+      return toI(dir);
+    }
+
+    const stream = await this.repository.openFileStream(prefixIndexPath);
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+
+    for await (prefix of readListStream(reader, decoder));
+
+    return this.findLastIndexPath(joinPath(dir, prefix));
+  }
+
+  /**
+   * Indexes are scanned downward from the specified index directory.
+   */
+  async *walkPrefixIndexesDownword(
+    indexParentDir: string
+  ): AsyncGenerator<string> {
+    const repository = this.repository;
+
+    // if a path to an index is specified for the first time,
+    // disable access to indexes located after it.
+    let visitable = false;
+
+    const walk = async function* (
+      dir: string,
+      visited: Set<string> = new Set()
+    ): AsyncGenerator<string> {
+      if (!visited.has(toP(dir)) && (await repository.exists(toP(dir)))) {
+        const stream = await repository.openFileStream(toP(dir));
+        const reader = stream.getReader();
+        const decoder = new TextDecoder();
+
+        // record visits that prefixes path
+        visited.add(toP(dir));
+
+        // record visits that include index directories
+        visited.add(dir);
+
+        for await (let prefix of readListStream(reader, decoder)) {
+          if (!visitable && visited.has(joinPath(dir, prefix))) {
+            visitable = true;
+          }
+
+          if (visitable) {
+            yield* walk(joinPath(dir, prefix), visited);
+          }
+        }
+      } else if (
+        !visited.has(toI(dir)) &&
+        (await repository.exists(toI(dir)))
+      ) {
+        yield toI(dir);
+
+        // record visits that index path
+        visited.add(toI(dir));
+
+        // record visits that include index directories
+        visited.add(dir);
+      } else {
+        // record visits that include index directories
+        visited.add(dir);
+      }
+
+      if (!visited.has(tail(dir).base)) {
+        // reset when ascending a hierarchy to enable skipping in that hierarchy
+        visitable = false;
+
+        yield* walk(tail(dir).base, visited);
+      }
+    };
+
+    yield* walk(indexParentDir, new Set());
+  }
+
+  /**
+   * Indexes are scanned upward from the specified index directory.
+   */
+  async *walkPrefixIndexesUpword(indexParentDir: string) {
+    const repository = this.repository;
+
+    // if a path to an index is specified for the first time,
+    // disable access to indexes located before it.
+    let visitable = false;
+
+    const walk = async function* (
+      dir: string,
+      visited: Set<string> = new Set()
+    ): AsyncGenerator<string> {
+      if (!visited.has(toP(dir)) && (await repository.exists(toP(dir)))) {
+        const stream = await repository.openFileStream(toP(dir));
+        const reader = stream.getReader();
+        const decoder = new TextDecoder();
+        const buff: Set<string> = new Set();
+
+        // record visits that prefixes path
+        visited.add(toP(dir));
+
+        // record visits that include index directories
+        visited.add(dir);
+
+        // buffer for desc
+        for await (const prefix of readListStream(reader, decoder)) {
+          buff.add(prefix);
+        }
+
+        for (const prefix of [...buff].reverse()) {
+          if (!visitable && visited.has(joinPath(dir, prefix))) {
+            visitable = true;
+          }
+
+          if (visitable) {
+            yield* walk(joinPath(dir, prefix), visited);
+          }
+        }
+      } else if (
+        !visited.has(toI(dir)) &&
+        (await repository.exists(toI(dir)))
+      ) {
+        yield toI(dir);
+
+        // record visits that index path
+        visited.add(toI(dir));
+
+        // record visits that include index directories
+        visited.add(dir);
+      } else {
+        // record visits that include index directories
+        visited.add(dir);
+      }
+
+      if (!visited.has(tail(dir).base)) {
+        // reset when ascending a hierarchy to enable skipping in that hierarchy
+        visitable = false;
+
+        yield* walk(tail(dir).base, visited);
+      }
+    };
+
+    yield* walk(indexParentDir, new Set());
   }
 
   /**
@@ -470,12 +722,16 @@ export class Indexer {
       Record<string, SourceRecord[]>
     >((acc, key, i) => ((acc[key] = loadedArrays[i]), acc), {});
 
-    // Create pre-cache for relation map
+    // create pre-cache for relation map
     const relationMaps: RelationMaps = {};
     for (const [key, rel] of Object.entries(relations)) {
       if (this.isThroughRelation(rel)) {
         relationMaps[key] = {
           targetMap: buildForeignKeyMap(dataMap[rel.to], rel.targetForeignKey),
+          throughMap: buildForeignKeyMap(
+            dataMap[rel.through],
+            rel.throughForeignKey
+          ),
         };
       } else {
         relationMaps[key] = {
@@ -493,7 +749,8 @@ export class Indexer {
             rel,
             dataMap[rel.through],
             dataMap[rel.to],
-            (relationMaps[key] as ThroughRelationMap).targetMap
+            (relationMaps[key] as ThroughRelationMap).targetMap,
+            (relationMaps[key] as ThroughRelationMap).throughMap
           );
         } else {
           result[key] = resolveDirectRelation(
@@ -596,7 +853,7 @@ export class Indexer {
       }
     }
 
-    // If the reference destination 'vs' (value slug) is different, even if 'v' (value) is the same, it will be a different index.
+    // if the reference destination 'vs' (value slug) is different, even if 'v' (value) is the same, it will be a different index.
     const entriesByStatus = new Map<
       string, // path
       Map<DiffEntry["status"], PrefixIndexLine[]>
@@ -608,8 +865,7 @@ export class Indexer {
           for (const [refSlug] of refMap) {
             const indexConfig = rsc.indexes[fieldName];
             const root = this.getPrefixIndexPath(value, indexConfig.depth);
-            const indexFile = "_index.jsonl";
-            const path = [indexConfig.dir, root, indexFile].join("/");
+            const path = toI(indexConfig.dir, root);
 
             const status = entryGroup
               ? this.getStatus(entryGroup, rsc.name, slug)
@@ -692,7 +948,7 @@ export class Indexer {
       const out = new Map<string, Set<string>>();
       for (const [dir, items] of reversedMap.entries()) {
         out.set(
-          dir + "/_prefixes.jsonl",
+          toP(dir),
           new Set([...items].sort((a, b) => a.localeCompare(b)))
         );
       }
@@ -774,7 +1030,7 @@ export class Indexer {
       .slice(0, depth)
       .map((char) => char.charCodeAt(0).toString(16).padStart(4, "0"));
 
-    return codes.join("/");
+    return joinPath(...codes);
   }
 
   /** Returns the path to the prefixes index dir. */
@@ -791,7 +1047,7 @@ export class Indexer {
 
     const config = rsc.indexes[field];
     const prefix = this.getPrefixIndexPath(value, config.depth);
-    const indexPath = `${config.dir}${prefix}/_index.jsonl`;
+    const indexPath = toI(config.dir, prefix);
 
     return indexPath;
   }
@@ -821,7 +1077,10 @@ export class Indexer {
 
     let found: boolean | null = null;
 
-    for await (const entry of readJsonlStream(reader, decoder)) {
+    for await (const entry of readJsonlStream<PrefixIndexLine>(
+      reader,
+      decoder
+    )) {
       if (filterCallback(entry.v, value)) {
         result.push(entry);
         found = true;

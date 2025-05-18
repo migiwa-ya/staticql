@@ -5,7 +5,6 @@ import {
   ThroughRelation,
 } from "../SourceConfigResolver.js";
 import { resolveField } from "./field.js";
-import { asArray } from "./normalize.js";
 
 /**
  * Builds a map from foreign key values to parent objects.
@@ -112,41 +111,32 @@ export function resolveThroughRelation(
   rel: ThroughRelation,
   throughData: SourceRecord[],
   targetData: SourceRecord[],
-  targetMapOpt?: ThroughRelationMap["targetMap"]
+  targetMapOpt?: ThroughRelationMap["targetMap"],
+  throughMapOpt?: ThroughRelationMap["targetMap"]
 ): any {
   const sourceKeys = resolveField(row, rel.sourceLocalKey).flat();
 
-  const throughMatches = throughData.filter((t: any) => {
-    const throughForeignKeys = resolveField(t, rel.throughForeignKey);
-    return sourceKeys.some((sourceKey) =>
-      throughForeignKeys.includes(sourceKey)
-    );
-  });
+  const throughMap: Map<string, SourceRecord[]> =
+    throughMapOpt ?? buildForeignKeyMap(throughData, rel.throughForeignKey);
 
-  let targetMap = targetMapOpt
-    ? targetMapOpt
-    : (() => {
-        const map: ThroughRelationMap["targetMap"] = new Map();
-        for (const item of targetData) {
-          const keys = resolveField(item, rel.targetForeignKey)
-            .filter((v): v is string => !!v)
-            .flat();
-          for (const key of keys) {
-            if (key) map.set(key, [item]);
-          }
-        }
+  const targetMap: Map<string, SourceRecord[]> =
+    targetMapOpt ?? buildForeignKeyMap(targetData, rel.targetForeignKey);
 
-        return map;
-      })();
+  const throughRecords: SourceRecord[] = sourceKeys
+    .map((k: string) => throughMap.get(k))
+    .filter((v: any): v is SourceRecord[] => !!v)
+    .filter(Boolean)
+    .flat();
 
-  const targets = throughMatches
+  const targets = throughRecords
     .map((t: any) => {
       const throughLocalKeys = resolveField(t, rel.throughLocalKey)
         .filter((v): v is string => !!v)
         .flat();
       return throughLocalKeys
         .map((k: string) => targetMap.get(k))
-        .filter((v: any) => v);
+        .filter((v: any): v is SourceRecord[] => !!v)
+        .flat();
     })
     .flat();
 

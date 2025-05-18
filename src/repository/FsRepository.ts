@@ -3,6 +3,7 @@ import { createReadStream } from "node:fs";
 import * as path from "path";
 import { StorageRepository } from "./StorageRepository";
 import { Readable } from "node:stream";
+import { joinPath } from "../utils/path";
 
 /**
  * FsRepository: StorageRepository implementation for the local file system.
@@ -49,7 +50,7 @@ export class FsRepository implements StorageRepository {
    * @returns Promise that resolves to a ReadableStream for the file contents
    */
   async openFileStream(path: string): Promise<ReadableStream> {
-    const fullPath = [this.baseDir, path].join("/");
+    const fullPath = joinPath(this.baseDir, path);
     const stream = createReadStream(fullPath);
     return Readable.toWeb(stream) as ReadableStream;
   }

@@ -1,4 +1,5 @@
 import { Indexer } from "./Indexer.js";
+import { joinPath } from "./utils/path.js";
 import { PrefixIndexDefinition, PrefixIndexDepth } from "./utils/typs.js";
 import { JSONSchema7 } from "./validator/Validator.js";
 
@@ -193,9 +194,9 @@ export class SourceConfigResolver {
 
   /**
    * Determines whether a relation is a through (indirect) relation.
-   * 
-   * @param rel 
-   * @returns 
+   *
+   * @param rel
+   * @returns
    */
   isThroughRelation(rel: Relation): rel is ThroughRelation {
     return (
@@ -258,7 +259,7 @@ export class SourceConfigResolver {
   static extractBaseDir(globPath: string): string {
     const parts = globPath.split("/");
     const index = parts.findIndex((part) => part.includes("*"));
-    return index === -1 ? globPath : parts.slice(0, index).join("/") + "/";
+    return index === -1 ? globPath : joinPath(...parts.slice(0, index)) + "/";
   }
 
   /**

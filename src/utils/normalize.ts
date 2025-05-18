@@ -37,3 +37,16 @@ export function mapSetToObject(value: any): any {
     return value;
   }
 }
+
+/**
+ * Parse _prefixes.jsonl content.
+ * 
+ * @param raw 
+ * @returns 
+ */
+export function parsePrefixDict(raw: string): string[] {
+  return raw
+    .split("\n")
+    .map((x) => x.trim())
+    .filter(Boolean);
+}

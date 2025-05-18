@@ -3,26 +3,25 @@ export interface PageInfo {
   hasPreviousPage: boolean;
   startCursor?: string;
   endCursor?: string;
-  total: number;
 }
+
+export type CursorObject = { slug: string; order: { [key: string]: string } };
 
 /**
  * Create PageInfo.
  *
- * @param total
  * @param page
  * @param pageSize
- * @param startIdx
+ * @param startIndex
  * @param matchedLen
  * @param direction
  * @param encodeCursor
  * @returns page info for cursor pagination
  */
 export function createPageInfo<T>(
-  total: number,
   page: T[],
   pageSize: number,
-  startIdx: number,
+  startIndex: number,
   matchedLen: number,
   direction: "after" | "before",
   encodeCursor: (item: T) => string
@@ -31,10 +30,10 @@ export function createPageInfo<T>(
   let hasPreviousPage = false;
 
   if (direction === "after") {
-    hasNextPage = startIdx + (startIdx > 0 ? 1 : 0) + pageSize < matchedLen;
-    hasPreviousPage = startIdx + (startIdx > 0 ? 1 : 0) > 0;
+    hasNextPage = startIndex + (startIndex > 0 ? 1 : 0) + pageSize < matchedLen;
+    hasPreviousPage = startIndex + (startIndex > 0 ? 1 : 0) > 0;
   } else {
-    const endIdx = startIdx;
+    const endIdx = startIndex;
     const beginIdx = Math.max(0, endIdx - pageSize);
     hasNextPage = endIdx < matchedLen;
     hasPreviousPage = beginIdx > 0;
@@ -46,7 +45,6 @@ export function createPageInfo<T>(
     startCursor: page.length > 0 ? encodeCursor(page[0]) : undefined,
     endCursor:
       page.length > 0 ? encodeCursor(page[page.length - 1]) : undefined,
-    total,
   };
 }
 
@@ -54,24 +52,24 @@ export function createPageInfo<T>(
  * Get sliced records.
  *
  * @param records
- * @param startIdx
+ * @param startIndex
  * @param pageSize
  * @param direction
  * @returns
  */
 export function getPageSlice<T>(
   records: T[],
-  startIdx: number,
+  startIndex: number,
   pageSize: number,
   direction: "after" | "before"
 ): T[] {
   if (direction === "after") {
     return records.slice(
-      startIdx + (startIdx > 0 ? 1 : 0),
-      startIdx + (startIdx > 0 ? 1 : 0) + pageSize
+      startIndex + (startIndex > 0 ? 1 : 0),
+      startIndex + (startIndex > 0 ? 1 : 0) + pageSize
     );
   } else {
-    const endIdx = startIdx;
+    const endIdx = startIndex;
     const beginIdx = Math.max(0, endIdx - pageSize);
     return records.slice(beginIdx, endIdx);
   }
@@ -83,8 +81,8 @@ export function getPageSlice<T>(
  * @param slug
  * @returns
  */
-export function encodeCursor(slug: string): string {
-  const str = JSON.stringify({ slug });
+export function encodeCursor(obj: CursorObject): string {
+  const str = JSON.stringify(obj);
   const bytes = new TextEncoder().encode(str);
   let binary = "";
   for (let b of bytes) binary += String.fromCharCode(b);
@@ -97,12 +95,12 @@ export function encodeCursor(slug: string): string {
  * @param cursor
  * @returns
  */
-export function decodeCursor(cursor: string): string {
+export function decodeCursor(cursor: string): CursorObject {
   try {
     const binary = atob(cursor);
     const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
     const obj = JSON.parse(new TextDecoder().decode(bytes));
-    return obj.slug;
+    return obj;
   } catch {
     throw new Error("Invalid cursor");
   }
