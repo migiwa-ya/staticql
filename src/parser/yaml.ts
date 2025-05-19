@@ -165,16 +165,6 @@ export function parseYAML({ rawContent }: { rawContent: string }): any {
         .filter((s) => s.length > 0);
     }
 
-    if (
-      typeof val === "string" &&
-      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(
-        val
-      )
-    ) {
-      const d = new Date(val);
-      if (!isNaN(d.getTime())) return d;
-    }
-
     return val;
   }
 
