@@ -118,15 +118,12 @@ export class SourceLoader<T> {
    */
   async loadBySlugs(sourceName: string, slugs: string[]): Promise<T[]> {
     const uniqueSlugs = Array.from(new Set(slugs));
-    const results = await Promise.allSettled(
-      uniqueSlugs.map((slug) => this.loadBySlug(sourceName, slug))
-    );
+    const results = [];
+    for (const slug of uniqueSlugs) {
+      results.push(await this.loadBySlug(sourceName, slug));
+    }
 
-    return results
-      .filter(
-        (r): r is PromiseFulfilledResult<Awaited<T>> => r.status === "fulfilled"
-      )
-      .map((r) => r.value);
+    return results;
   }
 
   /**

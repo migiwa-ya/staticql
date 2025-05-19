@@ -1087,36 +1087,39 @@ export class Indexer {
     const indexPath = this.getIndexPath(sourceName, field, value);
     if (!indexPath) return null;
 
-    if (await this.cache.has(indexPath)) {
-      return (await this.cache.get(indexPath)) ?? null;
-    }
+    const repository = this.repository;
 
-    if (!(await this.repository.exists(indexPath))) return null;
+    async function* find(indexPath: string, value: string) {
+      const stream = await repository.openFileStream(indexPath);
+      const reader = stream.getReader();
+      const decoder = new TextDecoder();
 
-    const stream = await this.repository.openFileStream(indexPath);
-    const reader = stream.getReader();
-    const decoder = new TextDecoder();
-    const result: PrefixIndexLine[] = [];
+      let found: boolean | null = null;
 
-    let found: boolean | null = null;
-
-    for await (const entry of readJsonlStream<PrefixIndexLine>(
-      reader,
-      decoder
-    )) {
-      if (filterCallback(entry.v, value)) {
-        result.push(entry);
-        found = true;
-      } else if (found === true) {
-        found = false;
-      }
-      if (found === false) {
-        await reader.cancel();
-        break;
+      for await (const entry of readJsonlStream<PrefixIndexLine>(
+        reader,
+        decoder
+      )) {
+        if (filterCallback(entry.v, value)) {
+          yield entry;
+          found = true;
+        } else if (found === true) {
+          found = false;
+        }
+        if (found === false) {
+          await reader.cancel();
+          break;
+        }
       }
     }
 
-    await this.cache.set(indexPath, result);
+    const gen = cacheAsyncGen(
+      (...args: [string, string]) => find(...args),
+      (...args) => args.join("_"),
+      this.cache
+    );
+
+    const result = await Array.fromAsync(gen(indexPath, value));
 
     return this.flatPrefixIndexLine(result);
   }
