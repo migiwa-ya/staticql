@@ -97,7 +97,7 @@ export class SourceLoader<T> {
 
       if (Array.isArray(parsed)) {
         const found = parsed.find((item) => item && item.slug === slug);
-        if (!found) throw new Error(`Slug not found in file: ${filePath}`);
+        if (!found) throw new Error(`Slug '${slug}' not found in file: ${filePath}`);
         this.validator.validate(found, rsc.schema, rsc.name);
         return found as T;
       } else {

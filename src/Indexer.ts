@@ -1087,6 +1087,8 @@ export class Indexer {
     const indexPath = this.getIndexPath(sourceName, field, value);
     if (!indexPath) return null;
 
+    if (!(await this.repository.exists(indexPath))) return null;
+
     const repository = this.repository;
 
     async function* find(indexPath: string, value: string) {

@@ -146,7 +146,7 @@ export class SourceConfigResolver {
 
     if (relationalSources) {
       for (const [_, rel] of relationalSources) {
-        let fieldName: string | null = null;
+        const fieldNames: Array<string | null> = [];
 
         if (
           rel.type === "belongsTo" ||
@@ -154,26 +154,29 @@ export class SourceConfigResolver {
           rel.type === "hasOne" ||
           rel.type === "hasMany"
         ) {
-          fieldName = rel.foreignKey === "slug" ? null : rel.foreignKey;
+          fieldNames.push(rel.foreignKey === "slug" ? null : rel.foreignKey);
         } else if (
           rel.type === "hasOneThrough" ||
           rel.type === "hasManyThrough"
         ) {
-          if (rel.to === sourceName) {
-            fieldName =
-              rel.targetForeignKey === "slug" ? null : rel.targetForeignKey;
-          } else {
-            fieldName =
-              rel.throughLocalKey === "slug" ? null : rel.throughLocalKey;
-          }
+          fieldNames.push(
+            rel.targetForeignKey === "slug" ? null : rel.targetForeignKey
+          );
+          fieldNames.push(
+            rel.throughForeignKey === "slug" ? null : rel.throughForeignKey
+          );
         }
 
-        if (!fieldName) continue;
+        if (!fieldNames.length) continue;
 
-        indexes[fieldName] = {
-          dir: Indexer.getIndexDir(sourceName, fieldName),
-          depth: Indexer.indexDepth,
-        };
+        for (const fieldName of fieldNames) {
+          if (!fieldName) continue;
+
+          indexes[fieldName] = {
+            dir: Indexer.getIndexDir(sourceName, fieldName),
+            depth: Indexer.indexDepth,
+          };
+        }
       }
     }
 
