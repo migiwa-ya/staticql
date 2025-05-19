@@ -19,6 +19,9 @@ import { readJsonlStream, readListStream } from "./utils/stream.js";
 import { mapSetToObject } from "./utils/normalize.js";
 import { PrefixIndexDepth, PrefixIndexLine } from "./utils/typs.js";
 import { decodeCursor } from "./utils/pagenation.js";
+import { cacheAsyncGen } from "./utils/cache.js";
+import { CacheProvider } from "./cache/CacheProvider.js";
+import { InMemoryCacheProvider } from "./cache/InMemoryCacheProvider.js";
 
 // represents a file diff entry (for incremental index updates).
 export type DiffEntry = { status: "A" | "D"; source: string; slug: string };
@@ -47,12 +50,16 @@ export class Indexer {
   public static indexPrefix = "index";
   public static indexDepth: PrefixIndexDepth = 2;
 
+  private cache: CacheProvider;
+
   constructor(
     private readonly sourceLoader: SourceLoader<SourceRecord>,
     private readonly repository: StorageRepository,
     private readonly resolver: Resolver,
     private readonly logger: LoggerProvider
-  ) {}
+  ) {
+    this.cache = new InMemoryCacheProvider();
+  }
 
   /**
    * Saves indexes and slug lists for all sources.
@@ -414,10 +421,16 @@ export class Indexer {
     let countable = !targetSlug;
 
     const indexWalker = isDesc
-      ? this.walkPrefixIndexesUpword(indexParentDir)
-      : this.walkPrefixIndexesDownword(indexParentDir);
+      ? this.walkPrefixIndexesUpword
+      : this.walkPrefixIndexesDownword;
 
-    for await (const indexPath of indexWalker) {
+    const gen = cacheAsyncGen(
+      (path: string) => indexWalker.bind(this)(path),
+      (path) => path,
+      this.cache
+    );
+
+    for await (const indexPath of gen(indexParentDir)) {
       const stream = await this.repository.openFileStream(indexPath);
       const reader = stream.getReader();
       const decoder = new TextDecoder();
@@ -464,10 +477,16 @@ export class Indexer {
     let countable = !targetSlug;
 
     const indexWalker = isDesc
-      ? this.walkPrefixIndexesDownword(indexParentDir)
-      : this.walkPrefixIndexesUpword(indexParentDir);
+      ? this.walkPrefixIndexesDownword
+      : this.walkPrefixIndexesUpword;
 
-    for await (const indexPath of indexWalker) {
+    const gen = cacheAsyncGen(
+      (path: string) => indexWalker.bind(this)(path),
+      (path) => path,
+      this.cache
+    );
+
+    for await (const indexPath of gen(indexParentDir)) {
       const stream = await this.repository.openFileStream(indexPath);
       const reader = stream.getReader();
       const decoder = new TextDecoder();
@@ -1068,6 +1087,10 @@ export class Indexer {
     const indexPath = this.getIndexPath(sourceName, field, value);
     if (!indexPath) return null;
 
+    if (await this.cache.has(indexPath)) {
+      return (await this.cache.get(indexPath)) ?? null;
+    }
+
     if (!(await this.repository.exists(indexPath))) return null;
 
     const stream = await this.repository.openFileStream(indexPath);
@@ -1092,6 +1115,8 @@ export class Indexer {
         break;
       }
     }
+
+    await this.cache.set(indexPath, result);
 
     return this.flatPrefixIndexLine(result);
   }

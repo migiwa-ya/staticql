@@ -5,16 +5,22 @@ import {
   ResolvedSourceConfig as RSC,
   SourceConfigResolver as Resolver,
 } from "./SourceConfigResolver.js";
+import { InMemoryCacheProvider } from "./cache/InMemoryCacheProvider.js";
+import { CacheProvider } from "./cache/CacheProvider.js";
 
 /**
  * Responsible for loading and validating content from static sources.
  */
 export class SourceLoader<T> {
+  private cache: CacheProvider;
+
   constructor(
     private repository: StorageRepository,
     private resolver: Resolver,
     private validator: Validator
-  ) {}
+  ) {
+    this.cache = new InMemoryCacheProvider();
+  }
 
   /**
    * Loads all records for a given source name.
@@ -87,7 +93,7 @@ export class SourceLoader<T> {
     }
 
     try {
-      const parsed = await this.parseFile(filePath, rsc, filePath);
+      const parsed = await this.parseFile(filePath, rsc);
 
       if (Array.isArray(parsed)) {
         const found = parsed.find((item) => item && item.slug === slug);
@@ -111,8 +117,9 @@ export class SourceLoader<T> {
    * @returns An array of matched and validated records.
    */
   async loadBySlugs(sourceName: string, slugs: string[]): Promise<T[]> {
+    const uniqueSlugs = Array.from(new Set(slugs));
     const results = await Promise.allSettled(
-      slugs.map((slug) => this.loadBySlug(sourceName, slug))
+      uniqueSlugs.map((slug) => this.loadBySlug(sourceName, slug))
     );
 
     return results
@@ -132,13 +139,13 @@ export class SourceLoader<T> {
    * @returns Parsed and validated record(s).
    * @throws If the slug is inconsistent or unsupported type.
    */
-  private async parseFile(
-    filePath: string,
-    rsc: RSC,
-    fullPath: string
-  ): Promise<T> {
-    const ext = this.getExtname(fullPath);
-    let raw = await this.repository.readFile(fullPath);
+  private async parseFile(filePath: string, rsc: RSC): Promise<T> {
+    if (await this.cache.has(filePath)) {
+      const cached = await this.cache.get<T>(filePath);
+      if (cached) return cached;
+    }
+
+    let raw = await this.repository.readFile(filePath);
     let parsed = await parseByType(rsc.type, { rawContent: raw });
 
     if (
@@ -160,6 +167,8 @@ export class SourceLoader<T> {
 
       parsed = parsedObj;
     }
+
+    await this.cache.set(filePath, parsed);
 
     return parsed as T;
   }
