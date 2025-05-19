@@ -194,6 +194,10 @@ export class QueryBuilder<T extends SourceRecord> {
     } else if (!matched.length && !filters.length) {
       // no conditions
 
+      if (!rsc.indexes![orderByKey].dir) {
+        throw new Error(`[${this.sourceName}] needs index: ${orderByKey}`);
+      }
+
       const indexDir = rsc.indexes![orderByKey].dir;
       const isDesc = this._orderByDirection === "desc";
       const isAfter = this._cursorDirection === "after";

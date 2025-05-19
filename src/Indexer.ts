@@ -430,26 +430,24 @@ export class Indexer {
       this.cache
     );
 
-    for await (const indexPath of gen(indexParentDir)) {
-      const stream = await this.repository.openFileStream(indexPath);
-      const reader = stream.getReader();
-      const decoder = new TextDecoder();
+    const reverseInFile = isDesc;
 
-      for await (const prefixIndexLine of readJsonlStream<PrefixIndexLine>(
-        reader,
-        decoder
+    for await (const indexPath of gen(indexParentDir)) {
+      for await (const prefixIndexLine of this.readIndexFileLines(
+        indexPath,
+        reverseInFile
       )) {
         if (!countable && targetSlug) {
-          if (Object.keys(prefixIndexLine.r).includes(targetSlug)) {
+          if (
+            Object.prototype.hasOwnProperty.call(prefixIndexLine.r, targetSlug)
+          ) {
             countable = true;
             continue;
           }
         }
-
         if (countable) {
           yield prefixIndexLine;
-          ++count;
-          if (count >= pageSize) return;
+          if (++count >= pageSize) return;
         }
       }
     }
@@ -486,36 +484,53 @@ export class Indexer {
       this.cache
     );
 
+    const reverseInFile = !isDesc;
+
     for await (const indexPath of gen(indexParentDir)) {
-      const stream = await this.repository.openFileStream(indexPath);
-      const reader = stream.getReader();
-      const decoder = new TextDecoder();
-      const buff: Set<PrefixIndexLine> = new Set();
-
-      // buffer for desc
-      for await (const prefixIndexLine of readJsonlStream<PrefixIndexLine>(
-        reader,
-        decoder
+      for await (const prefixIndexLine of this.readIndexFileLines(
+        indexPath,
+        reverseInFile
       )) {
-        // index contents are fixed in ascending order,
-        // so they need to be collected once and put in descending order
-        buff.add(prefixIndexLine);
-      }
-
-      for (const prefixIndexLine of [...buff].reverse()) {
         if (!countable && targetSlug) {
-          if (Object.keys(prefixIndexLine.r).includes(targetSlug)) {
+          if (
+            Object.prototype.hasOwnProperty.call(prefixIndexLine.r, targetSlug)
+          ) {
             countable = true;
             continue;
           }
         }
-
         if (countable) {
           yield prefixIndexLine;
-          ++count;
-          if (count >= pageSize) return;
+          if (++count >= pageSize) return;
         }
       }
+    }
+  }
+
+  /**
+   * Read index file lines.
+   */
+  async *readIndexFileLines(
+    indexPath: string,
+    reverse: boolean
+  ): AsyncGenerator<PrefixIndexLine> {
+    const stream = await this.repository.openFileStream(indexPath);
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+
+    if (reverse) {
+      // index contents are fixed in ascending order,
+      // so they need to be collected once and put in descending order
+      const buf: PrefixIndexLine[] = [];
+      for await (const line of readJsonlStream<PrefixIndexLine>(
+        reader,
+        decoder
+      )) {
+        buf.push(line);
+      }
+      yield* buf.reverse();
+    } else {
+      yield* readJsonlStream<PrefixIndexLine>(reader, decoder);
     }
   }
 

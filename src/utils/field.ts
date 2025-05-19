@@ -37,7 +37,7 @@ export function resolveField(obj: any, fieldPath: string): string[] {
   return values
     .flat(Infinity)
     .filter((v) => v !== undefined && v !== null)
-    .map((v) => String(v));
+    .map((v) => (!isNaN(Date.parse(v)) ? v.toISOString() : String(v)));
 }
 
 /**

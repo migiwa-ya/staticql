@@ -34,3 +34,4 @@ export function defineStaticQL(config: StaticQLConfig) {
 export type { StaticQLConfig } from "./StaticQL.js";
 export type { Validator } from "./validator/Validator.js";
 export { ConsoleLogger } from "./logger/ConsoleLogger.js";
+export type { PageInfo } from "./utils/pagenation.js";
