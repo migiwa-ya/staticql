@@ -194,7 +194,7 @@ export class QueryBuilder<T extends SourceRecord> {
     } else if (!matched.length && !filters.length) {
       // no conditions
 
-      if (!rsc.indexes![orderByKey].dir) {
+      if (!rsc.indexes![orderByKey]) {
         throw new Error(`[${this.sourceName}] needs index: ${orderByKey}`);
       }
 
@@ -208,7 +208,7 @@ export class QueryBuilder<T extends SourceRecord> {
         page = await Array.fromAsync(
           this.indexer.readForwardPrefixIndexLines(
             indexDir,
-            this._pageSize,
+            this._pageSize + 1,
             this._cursorValue,
             orderByKey,
             isDesc
@@ -218,7 +218,7 @@ export class QueryBuilder<T extends SourceRecord> {
         const data = await Array.fromAsync(
           this.indexer.readBackwardPrefixIndexLines(
             indexDir,
-            this._pageSize,
+            this._pageSize + 1,
             this._cursorValue,
             orderByKey,
             isDesc
@@ -233,22 +233,16 @@ export class QueryBuilder<T extends SourceRecord> {
       if (!page.length) return empty;
 
       // set hasPreviousPage
-      const fv = Object.values(page[0].r);
-      const fp = joinPath(indexDir, fv[0][orderByKey][0]);
-      const firstItemPoint = isDesc
-        ? this.indexer.walkPrefixIndexesDownword(fp)
-        : this.indexer.walkPrefixIndexesUpword(fp);
-      await firstItemPoint.next();
-      hasPreviousPage = !(await firstItemPoint.next()).done;
+      hasPreviousPage = isAfter
+        ? !!this._cursorValue
+        : page.length > this._pageSize;
 
       // set hasNextPage
-      const lv = Object.values(page[page.length - 1].r);
-      const lp = joinPath(indexDir, lv[lv.length - 1][orderByKey][0]);
-      const lastItemPoint = isDesc
-        ? this.indexer.walkPrefixIndexesUpword(lp)
-        : this.indexer.walkPrefixIndexesDownword(lp);
-      await lastItemPoint.next();
-      hasNextPage = !(await lastItemPoint.next()).done;
+      hasNextPage = isAfter
+        ? page.length > this._pageSize
+        : !!this._cursorValue;
+
+      page = page.slice(0, this._pageSize);
 
       pageInfo = {
         hasPreviousPage,

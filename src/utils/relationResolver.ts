@@ -89,6 +89,8 @@ export function resolveDirectRelation(
       .filter((v: any) => v);
   }
 
+  matches = matches.flat()
+
   if (relType === "hasOne") {
     return matches.length > 0 ? matches[0] : null;
   } else {
