@@ -20,7 +20,6 @@ import {
   PageInfo,
 } from "./utils/pagenation.js";
 import { Fields, JoinableKeys, PrefixIndexLine } from "./utils/typs.js";
-import { joinPath } from "./utils/path.js";
 
 type Operator = "eq" | "startsWith" | "in";
 
@@ -85,12 +84,6 @@ export class QueryBuilder<T extends SourceRecord> {
     op: Operator,
     value: string | string[]
   ): QueryBuilder<T> {
-    if (op === "startsWith" && value.length < 2) {
-      throw new Error(
-        "The value for 'startsWith' must be more than 2 characters."
-      );
-    }
-
     this.filters.push({ field, op, value } as Filter);
     return this;
   }

@@ -1099,7 +1099,10 @@ export class Indexer {
     const rsc = this.resolver.resolveOne(sourceName);
     if (!rsc.indexes) return null;
 
-    const indexPath = this.getIndexPath(sourceName, field, value);
+    let indexPath = this.getIndexPath(sourceName, field, value);
+    if (indexPath && rsc.indexes[field].depth > value.length) {
+      indexPath = await this.findFirstIndexPath(tail(indexPath).base);
+    }
     if (!indexPath) return null;
 
     if (!(await this.repository.exists(indexPath))) return null;
