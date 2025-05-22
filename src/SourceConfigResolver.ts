@@ -24,7 +24,11 @@ export interface SourceConfig {
   pattern: string;
   schema: JSONSchema7;
   relations?: Record<string, Relation>;
-  index?: (string | { [field: string]: { indexDepth: PrefixIndexDepth } })[];
+  index?: (string | { [field: string]: { indexDepth?: PrefixIndexDepth } })[];
+  customIndex?: (
+    | string
+    | { [field: string]: { indexDepth?: PrefixIndexDepth } }
+  )[];
 }
 
 /**
@@ -177,6 +181,25 @@ export class SourceConfigResolver {
             depth: Indexer.indexDepth,
           };
         }
+      }
+    }
+
+    // resolve customIndexes
+    if (Array.isArray(source.customIndex)) {
+      for (const field of source.customIndex) {
+        const fieldName =
+          typeof field === "object" ? Object.keys(field)[0] : field;
+        const depth =
+          typeof field === "object"
+            ? field[fieldName]["indexDepth"] ?? Indexer.indexDepth
+            : Indexer.indexDepth;
+
+        if (!this.isDepthInRange(depth)) throw new Error("");
+
+        indexes[fieldName] = {
+          dir: Indexer.getIndexDir(sourceName, fieldName),
+          depth,
+        };
       }
     }
 

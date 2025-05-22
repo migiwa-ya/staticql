@@ -21,6 +21,12 @@ import {
 } from "./utils/pagenation.js";
 import { Fields, JoinableKeys, PrefixIndexLine } from "./utils/typs.js";
 
+type CustomIndex = { __brand: "CustomIndex" };
+
+type OmitCustomIndex<T> = {
+  [K in keyof T as T[K] extends CustomIndex ? never : K]: T[K];
+};
+
 type Operator = "eq" | "startsWith" | "in";
 
 type Filter =
@@ -30,7 +36,7 @@ type Filter =
 type OrderByDirection = "asc" | "desc";
 
 export interface PageResult<T> {
-  data: T[];
+  data: OmitCustomIndex<T>[];
   pageInfo: PageInfo;
 }
 

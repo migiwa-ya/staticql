@@ -77,10 +77,13 @@ export class StaticQL {
    * Saves index files for all sources
    * to the configured output directory.
    *
+   * @param customIndexers - Optional custom indexer callbacks for _custom indexes.
    * @throws If writing to the storage fails.
    */
-  async saveIndexes(): Promise<void> {
-    await this.getIndexer().save();
+  async saveIndexes(
+    customIndexers?: Record<string, (value: any, record?: SourceRecord) => any>
+  ): Promise<void> {
+    await this.getIndexer(customIndexers).save();
   }
 
   /**
@@ -94,7 +97,9 @@ export class StaticQL {
    * Returns an Indexer instance.
    * Useful for incremental index updates.
    */
-  getIndexer(): Indexer {
+  getIndexer(
+    customIndexers?: Record<string, (value: any, record?: SourceRecord) => any>
+  ): Indexer {
     const sourceLoader = new SourceLoader<SourceRecord>(
       this.repository,
       this.sourceConfigResolver,
@@ -105,7 +110,8 @@ export class StaticQL {
       sourceLoader,
       this.repository,
       this.sourceConfigResolver,
-      this.logger
+      this.logger,
+      customIndexers
     );
   }
 }

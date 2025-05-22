@@ -25,6 +25,8 @@ export type NestedKeys<
             `${Prefix}${Prefix extends "" ? "" : "."}${Extract<K, string>}`,
             Prev[Depth]
           >
+        : K extends "__brand"
+        ? never
         : `${Prefix}${Prefix extends "" ? "" : "."}${Extract<K, string>}`;
     }[keyof T]
   : never;
@@ -58,7 +60,7 @@ export type RelationalFields<T> = {
 // All queryable fields
 export type Fields<T> = RelationalFields<T> | SourceFields<T>;
 
-// Directory depth of Prefix Index 
+// Directory depth of Prefix Index
 export type PrefixIndexDepth = 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 
 // Prefix Index Definition for staticql.config.json
@@ -82,4 +84,3 @@ export type RawPrefixIndexLine = {
   slug: string;
   values: Record<string, Record<string, string | string[]>>;
 };
-

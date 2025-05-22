@@ -51,14 +51,22 @@ export class Indexer {
   public static indexDepth: PrefixIndexDepth = 2;
 
   private cache: CacheProvider;
+  private customIndexers: Record<
+    string,
+    (value: any, record?: SourceRecord) => any
+  > = {};
 
   constructor(
     private readonly sourceLoader: SourceLoader<SourceRecord>,
     private readonly repository: StorageRepository,
     private readonly resolver: Resolver,
-    private readonly logger: LoggerProvider
+    private readonly logger: LoggerProvider,
+    customIndexers?: Record<string, (value: any, record?: SourceRecord) => any>
   ) {
     this.cache = new InMemoryCacheProvider();
+    if (customIndexers) {
+      this.customIndexers = customIndexers;
+    }
   }
 
   /**
@@ -776,6 +784,8 @@ export class Indexer {
 
     const records = dataMap[rsc.name].map((row) => {
       const result = { ...row };
+
+      // resolve relations
       for (const [key, rel] of Object.entries(relations)) {
         if (this.isThroughRelation(rel)) {
           result[key] = resolveThroughRelation(
@@ -795,6 +805,33 @@ export class Indexer {
           );
         }
       }
+
+      // resolve customIndexes
+      if (rsc.indexes && this.customIndexers) {
+        for (const [customName, _] of Object.entries(rsc.indexes)) {
+          if (
+            !Object.prototype.hasOwnProperty.call(
+              this.customIndexers,
+              customName
+            )
+          )
+            continue;
+          const callback = this.customIndexers[customName];
+          if (typeof callback === "function") {
+            try {
+              const customValue = callback(row);
+              if (customValue !== undefined && customValue !== null) {
+                result[customName] = customValue;
+              }
+            } catch (e) {
+              this.logger?.warn?.(
+                `[Indexer] Custom indexer for "${customName}" threw error: ${e}`
+              );
+            }
+          }
+        }
+      }
+
       return result;
     });
 
@@ -1023,6 +1060,7 @@ export class Indexer {
       string,
       Set<{ value: string; refSlug: string }>
     > = new Map();
+
     for (const field of indexFields) {
       let valueArr = resolveField(record, field);
 
@@ -1038,6 +1076,34 @@ export class Indexer {
           values
             .get(field)
             ?.add({ value: valueArr[i], refSlug: valueSlugs[i] });
+        }
+      }
+    }
+
+    if (rsc.indexes && this.customIndexers) {
+      for (const [customName, _] of Object.entries(rsc.indexes)) {
+        if (
+          !Object.prototype.hasOwnProperty.call(this.customIndexers, customName)
+        )
+          continue;
+
+        try {
+          const callback = this.customIndexers[customName];
+          const customValue = callback(record);
+
+          if (customValue !== undefined && customValue !== null) {
+            if (!values.has(customName)) values.set(customName, new Set());
+            const arr = Array.isArray(customValue)
+              ? customValue
+              : [customValue];
+            for (const v of arr) {
+              values.get(customName)?.add({ value: v, refSlug: record.slug });
+            }
+          }
+        } catch (e) {
+          this.logger?.warn?.(
+            `[Indexer] Custom indexer for "${customName}" threw error: ${e}`
+          );
         }
       }
     }
