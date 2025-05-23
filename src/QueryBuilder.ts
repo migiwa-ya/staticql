@@ -6,9 +6,11 @@ import {
 import { SourceLoader } from "./SourceLoader";
 import { Indexer } from "./Indexer";
 import {
+  DirectRelation,
   ResolvedSourceConfig as RSC,
   SourceConfigResolver as Resolver,
   SourceRecord,
+  ThroughRelation,
 } from "./SourceConfigResolver";
 import { LoggerProvider } from "./logger/LoggerProvider";
 import {
@@ -321,7 +323,12 @@ export class QueryBuilder<T extends SourceRecord> {
 
       if (rel.type === "hasOneThrough" || rel.type === "hasManyThrough") {
         result = await this.applyThroughRelation(result, key, rel);
-      } else {
+      } else if (
+        rel.type === "hasOne" ||
+        rel.type === "hasMany" ||
+        rel.type === "belongsTo" ||
+        rel.type === "belongsToMany"
+      ) {
         result = await this.applyDirectRelation(result, key, rel);
       }
     }
@@ -335,7 +342,7 @@ export class QueryBuilder<T extends SourceRecord> {
   private async applyDirectRelation(
     result: T[],
     key: string,
-    rel: any
+    rel: DirectRelation
   ): Promise<T[]> {
     const directRel = rel as Extract<
       typeof rel,
@@ -399,7 +406,7 @@ export class QueryBuilder<T extends SourceRecord> {
   private async applyThroughRelation(
     result: T[],
     key: string,
-    rel: any
+    rel: ThroughRelation
   ): Promise<T[]> {
     const sourceSlugs = result.flatMap((row) =>
       resolveField(row, rel.sourceLocalKey)
@@ -464,44 +471,50 @@ export class QueryBuilder<T extends SourceRecord> {
     indexedFilters: Filter[],
     rsc: RSC
   ) {
-    let matched: PrefixIndexLine[] = [];
+    let matched: Set<PrefixIndexLine> = new Set();
+    let matchedArray: PrefixIndexLine[];
 
     for (const filter of indexedFilters) {
       const { field, op, value } = filter;
+      let matchedIndexes: PrefixIndexLine[] = [];
 
       if (Object.keys(rsc.indexes ?? {}).length) {
         if (op === "eq") {
-          const matchedIndex = await this.indexer.findIndexLines(
-            sourceName,
-            field,
-            String(value)
-          );
-
-          if (matchedIndex) matched.push(...matchedIndex);
-        } else if (op === "startsWith") {
-          const matchedIndex = await this.indexer.findIndexLines(
-            sourceName,
-            field,
-            String(value),
-            (indexValue, argValue) => indexValue.startsWith(argValue)
-          );
-
-          if (matchedIndex) matched.push(...matchedIndex);
-        } else if (op === "in" && Array.isArray(value)) {
-          for (const keyValue of value) {
-            const matchedIndex = await this.indexer.findIndexLines(
+          matchedIndexes =
+            (await this.indexer.findIndexLines(
               sourceName,
               field,
-              String(keyValue)
+              String(value)
+            )) ?? [];
+        } else if (op === "startsWith") {
+          matchedIndexes =
+            (await this.indexer.findIndexLines(
+              sourceName,
+              field,
+              String(value),
+              (indexValue, argValue) => indexValue.startsWith(argValue)
+            )) ?? [];
+        } else if (op === "in" && Array.isArray(value)) {
+          for (const keyValue of value) {
+            matchedIndexes.push(
+              ...((await this.indexer.findIndexLines(
+                sourceName,
+                field,
+                String(keyValue)
+              )) ?? [])
             );
-
-            if (matchedIndex) matched.push(...matchedIndex);
           }
+        }
+
+        if (matchedIndexes) {
+          for (const matchedIndex of matchedIndexes) matched.add(matchedIndex);
         }
       }
     }
 
-    matched.sort((a, b) => {
+    matchedArray = [...matched];
+
+    matchedArray.sort((a, b) => {
       const [, avs] = Object.entries(a.r)[0];
       const [, bvs] = Object.entries(b.r)[0];
       const av = String(avs[String(this._orderByKey)]);
@@ -511,11 +524,11 @@ export class QueryBuilder<T extends SourceRecord> {
       if (aEmpty || bEmpty) {
         throw new Error("orderby need index");
       }
-      return this._orderByDirection
+      return this._orderByDirection === 'desc'
         ? bv.localeCompare(av)
         : av.localeCompare(bv);
     });
 
-    return matched?.length ? matched : [];
+    return matchedArray?.length ? matchedArray : [];
   }
 }

@@ -1175,39 +1175,44 @@ export class Indexer {
 
     const repository = this.repository;
 
-    async function* find(indexPath: string, value: string) {
-      const stream = await repository.openFileStream(indexPath);
+    const indexWalker = this.walkPrefixIndexesDownword;
+
+    const gen = cacheAsyncGen(
+      (path: string) => indexWalker.bind(this)(path),
+      (path) => path,
+      this.cache
+    );
+
+    const result: Set<PrefixIndexLine> = new Set();
+
+    let found: boolean | null = null;
+
+    finder: for await (const indexPathEntry of gen(tail(indexPath).base)) {
+      const stream = await repository.openFileStream(indexPathEntry);
       const reader = stream.getReader();
       const decoder = new TextDecoder();
-
-      let found: boolean | null = null;
 
       for await (const entry of readJsonlStream<PrefixIndexLine>(
         reader,
         decoder
       )) {
         if (filterCallback(entry.v, value)) {
-          yield entry;
+          result.add(entry);
           found = true;
         } else if (found === true) {
           found = false;
         }
         if (found === false) {
           await reader.cancel();
-          break;
+          break finder;
         }
       }
+
+      // if result is empty before walk next index, no there more
+      if (!result.size) break;
     }
 
-    const gen = cacheAsyncGen(
-      (...args: [string, string]) => find(...args),
-      (...args) => args.join("_"),
-      this.cache
-    );
-
-    const result = await Array.fromAsync(gen(indexPath, value));
-
-    return this.flatPrefixIndexLine(result);
+    return this.flatPrefixIndexLine([...result]);
   }
 
   /**
