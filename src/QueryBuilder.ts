@@ -495,15 +495,15 @@ export class QueryBuilder<T extends SourceRecord> {
               (indexValue, argValue) => indexValue.startsWith(argValue)
             )) ?? [];
         } else if (op === "in" && Array.isArray(value)) {
+          const buff: Set<Promise<PrefixIndexLine[] | null>> = new Set();
           for (const keyValue of value) {
-            matchedIndexes.push(
-              ...((await this.indexer.findIndexLines(
-                sourceName,
-                field,
-                String(keyValue)
-              )) ?? [])
+            buff.add(
+              this.indexer.findIndexLines(sourceName, field, String(keyValue))
             );
           }
+
+          const f = (await Promise.all([...buff])).flat();
+          matchedIndexes.push(...f.filter((i): i is PrefixIndexLine => !!i));
         }
 
         if (matchedIndexes) {
@@ -524,7 +524,7 @@ export class QueryBuilder<T extends SourceRecord> {
       if (aEmpty || bEmpty) {
         throw new Error("orderby need index");
       }
-      return this._orderByDirection === 'desc'
+      return this._orderByDirection === "desc"
         ? bv.localeCompare(av)
         : av.localeCompare(bv);
     });

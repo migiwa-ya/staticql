@@ -97,7 +97,8 @@ export class SourceLoader<T> {
 
       if (Array.isArray(parsed)) {
         const found = parsed.find((item) => item && item.slug === slug);
-        if (!found) throw new Error(`Slug '${slug}' not found in file: ${filePath}`);
+        if (!found)
+          throw new Error(`Slug '${slug}' not found in file: ${filePath}`);
         this.validator.validate(found, rsc.schema, rsc.name);
         return found as T;
       } else {
@@ -117,13 +118,9 @@ export class SourceLoader<T> {
    * @returns An array of matched and validated records.
    */
   async loadBySlugs(sourceName: string, slugs: string[]): Promise<T[]> {
-    const uniqueSlugs = Array.from(new Set(slugs));
-    const results = [];
-    for (const slug of uniqueSlugs) {
-      results.push(await this.loadBySlug(sourceName, slug));
-    }
+    const unique = [...new Set(slugs)];
 
-    return results;
+    return Promise.all(unique.map((slug) => this.loadBySlug(sourceName, slug)));
   }
 
   /**
