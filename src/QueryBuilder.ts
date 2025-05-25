@@ -22,6 +22,7 @@ import {
   PageInfo,
 } from "./utils/pagenation.js";
 import { Fields, JoinableKeys, PrefixIndexLine } from "./utils/typs.js";
+import { asArray } from "./utils/normalize.js";
 
 type CustomIndex = { __brand: "CustomIndex" };
 
@@ -469,50 +470,113 @@ export class QueryBuilder<T extends SourceRecord> {
   private async getMatchedIndexes(
     sourceName: string,
     indexedFilters: Filter[],
-    rsc: RSC
+    rsc: RSC,
+    andMode: boolean = true
   ) {
-    let matched: Set<PrefixIndexLine> = new Set();
-    let matchedArray: PrefixIndexLine[];
+    let matched: PrefixIndexLine[] | null = null;
 
-    for (const filter of indexedFilters) {
+    for (let i = 0; i < indexedFilters.length; i++) {
+      const filter = indexedFilters[i];
       const { field, op, value } = filter;
       let matchedIndexes: PrefixIndexLine[] = [];
 
-      if (Object.keys(rsc.indexes ?? {}).length) {
-        if (op === "eq") {
-          matchedIndexes =
-            (await this.indexer.findIndexLines(
+      if (andMode && matched && i > 0) {
+        // for the second (narrow down from matched)
+
+        const indexConfig = rsc.indexes?.[field];
+        const depth = indexConfig?.depth ?? Indexer.indexDepth;
+
+        let entries: PrefixIndexLine[] = [];
+        for (const v of asArray(value)) {
+          const searchValue = String(v);
+          const searchPrefix = this.indexer.getPrefixIndexPath(
+            searchValue,
+            depth
+          );
+
+          const candidates = matched.filter((m) => {
+            const mSlug = Object.keys(m.r)[0];
+            const mField = m.r[mSlug]?.[field];
+            if (!mField) return false;
+            return mField.some((p: string) =>
+              op === "startsWith"
+                ? p.startsWith(searchPrefix)
+                : p === searchPrefix
+            );
+          });
+
+          // no more match
+          if (!candidates.length) continue;
+
+          if (searchValue.length <= depth) {
+            // index match
+
+            entries.push(...candidates);
+          } else {
+            // partial index match
+
+            const found = await this.indexer.findIndexLines(
               sourceName,
               field,
-              String(value)
-            )) ?? [];
-        } else if (op === "startsWith") {
-          matchedIndexes =
-            (await this.indexer.findIndexLines(
-              sourceName,
-              field,
-              String(value),
-              (indexValue, argValue) => indexValue.startsWith(argValue)
-            )) ?? [];
-        } else if (op === "in" && Array.isArray(value)) {
-          const buff: Set<Promise<PrefixIndexLine[] | null>> = new Set();
-          for (const keyValue of value) {
-            buff.add(
-              this.indexer.findIndexLines(sourceName, field, String(keyValue))
+              searchValue
+            );
+            if (!found) continue;
+
+            // extract match
+            entries.push(
+              ...matched.filter((m) => {
+                const mSlug = Object.keys(m.r)[0];
+                return found.some((line) => !!line.r[mSlug]);
+              })
             );
           }
-
-          const f = (await Promise.all([...buff])).flat();
-          matchedIndexes.push(...f.filter((i): i is PrefixIndexLine => !!i));
         }
 
-        if (matchedIndexes) {
-          for (const matchedIndex of matchedIndexes) matched.add(matchedIndex);
+        matchedIndexes.push(...entries);
+
+        // no more match
+        if (!matchedIndexes.length) return [];
+      } else {
+        // for the first
+
+        if (Object.keys(rsc.indexes ?? {}).length) {
+          if (op === "eq") {
+            matchedIndexes =
+              (await this.indexer.findIndexLines(
+                sourceName,
+                field,
+                String(value)
+              )) ?? [];
+          } else if (op === "startsWith") {
+            matchedIndexes =
+              (await this.indexer.findIndexLines(
+                sourceName,
+                field,
+                String(value),
+                (indexValue, argValue) => indexValue.startsWith(argValue)
+              )) ?? [];
+          } else if (op === "in" && Array.isArray(value)) {
+            const buff: Set<Promise<PrefixIndexLine[] | null>> = new Set();
+            for (const keyValue of value) {
+              buff.add(
+                this.indexer.findIndexLines(sourceName, field, String(keyValue))
+              );
+            }
+
+            const f = (await Promise.all([...buff])).flat();
+            matchedIndexes.push(...f.filter((i): i is PrefixIndexLine => !!i));
+          }
         }
+      }
+
+      if (andMode) {
+        matched = matchedIndexes;
+      } else {
+        matched = [...(matched ?? []), ...matchedIndexes];
       }
     }
 
-    matchedArray = [...matched];
+    const matchedArray = matched ?? [];
 
     matchedArray.sort((a, b) => {
       const [, avs] = Object.entries(a.r)[0];
@@ -529,6 +593,6 @@ export class QueryBuilder<T extends SourceRecord> {
         : av.localeCompare(bv);
     });
 
-    return matchedArray?.length ? matchedArray : [];
+    return matchedArray.length ? matchedArray : [];
   }
 }

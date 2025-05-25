@@ -740,6 +740,21 @@ export class Indexer {
   }
 
   /**
+   * Get Prefix Index directories path converted with Unicode.
+   *
+   * @param value 
+   * @param depth 
+   * @returns 
+   */
+  getPrefixIndexPath(value: string, depth: number): string {
+    const codes = [...value]
+      .slice(0, depth)
+      .map((char) => char.charCodeAt(0).toString(16).padStart(4, "0"));
+
+    return joinPath(...codes);
+  }
+
+  /**
    * Builds indexable records for a single source (with joined relations).
    */
   private async buildRecords(rsc: RSC) {
@@ -1120,17 +1135,6 @@ export class Indexer {
       "through" in rel &&
       (rel.type === "hasOneThrough" || rel.type === "hasManyThrough")
     );
-  }
-
-  /**
-   * Get Prefix Index directories path converted with Unicode.
-   */
-  private getPrefixIndexPath(value: string, depth: number): string {
-    const codes = [...value]
-      .slice(0, depth)
-      .map((char) => char.charCodeAt(0).toString(16).padStart(4, "0"));
-
-    return joinPath(...codes);
   }
 
   /** Returns the path to the prefixes index dir. */
