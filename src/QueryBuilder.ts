@@ -3,8 +3,8 @@ import {
   resolveDirectRelation,
   resolveThroughRelation,
 } from "./utils/relationResolver.js";
-import { SourceLoader } from "./SourceLoader";
-import { Indexer } from "./Indexer";
+import { SourceLoader } from "./SourceLoader.js";
+import { Indexer } from "./Indexer.js";
 import {
   DirectRelation,
   ResolvedSourceConfig as RSC,
@@ -145,12 +145,36 @@ export class QueryBuilder<T extends SourceRecord> {
    */
   async exec(): Promise<PageResult<T>> {
     const rsc = this.resolver.resolveOne(this.sourceName);
-    const filters = this.extractIndexFilters(rsc);
     const requiresJoin = this.joins.length > 0;
+
+    const { page, pageInfo } = await this.compose();
+
+    const slugs = page.flatMap((x) => Object.keys(x.r));
+    let data = (await this.loader.loadBySlugs(this.sourceName, slugs)) as T[];
+    if (requiresJoin) data = await this.applyJoins(data, rsc);
+
+    return { data, pageInfo };
+  }
+
+  /**
+   * Returns only the index page without loading full data.
+   *
+   * @returns Index page, pageInfo.
+   */
+  async peek(): Promise<{ page: PrefixIndexLine[]; pageInfo: PageInfo }> {
+    return await this.compose();
+  }
+
+  /**
+   * Compose pages.
+   */
+  private async compose() {
+    const rsc = this.resolver.resolveOne(this.sourceName);
+    const filters = this.extractIndexFilters(rsc);
     const orderByKey = String(this._orderByKey);
 
     const empty = {
-      data: [],
+      page: [],
       pageInfo: {
         hasNextPage: false,
         hasPreviousPage: false,
@@ -256,11 +280,7 @@ export class QueryBuilder<T extends SourceRecord> {
       return empty;
     }
 
-    const slugs = page.flatMap((x) => Object.keys(x.r));
-    let data = (await this.loader.loadBySlugs(this.sourceName, slugs)) as T[];
-    if (requiresJoin) data = await this.applyJoins(data, rsc);
-
-    return { data, pageInfo };
+    return { page, pageInfo };
   }
 
   /**

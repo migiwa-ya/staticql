@@ -742,9 +742,9 @@ export class Indexer {
   /**
    * Get Prefix Index directories path converted with Unicode.
    *
-   * @param value 
-   * @param depth 
-   * @returns 
+   * @param value
+   * @param depth
+   * @returns
    */
   getPrefixIndexPath(value: string, depth: number): string {
     const codes = [...value]
@@ -827,11 +827,11 @@ export class Indexer {
           if (
             !Object.prototype.hasOwnProperty.call(
               this.customIndexers,
-              customName
+              `${rsc.name}.${customName}`
             )
           )
             continue;
-          const callback = this.customIndexers[customName];
+          const callback = this.customIndexers[`${rsc.name}.${customName}`];
           if (typeof callback === "function") {
             try {
               const customValue = callback(row);
