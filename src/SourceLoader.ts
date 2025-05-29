@@ -153,7 +153,7 @@ export class SourceLoader<T> {
 
       if (!parsedObj.slug) {
         parsedObj.slug = slugFromPath;
-      } else if (parsedObj.slug !== slugFromPath) {
+      } else if (!slugFromPath.includes(String(parsedObj.slug))) {
         throw new Error(
           `Slug mismatch: expected "${slugFromPath}", got "${parsedObj.slug}" in ${filePath}`
         );
