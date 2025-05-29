@@ -24,12 +24,6 @@ import {
 import { Fields, JoinableKeys, PrefixIndexLine } from "./utils/typs.js";
 import { asArray } from "./utils/normalize.js";
 
-type CustomIndex = { __brand: "CustomIndex" };
-
-type OmitCustomIndex<T> = {
-  [K in keyof T as T[K] extends CustomIndex ? never : K]: T[K];
-};
-
 type Operator = "eq" | "startsWith" | "in";
 
 type Filter =
@@ -39,17 +33,17 @@ type Filter =
 type OrderByDirection = "asc" | "desc";
 
 export interface PageResult<T> {
-  data: OmitCustomIndex<T>[];
+  data: T[];
   pageInfo: PageInfo;
 }
 
 /**
  * QueryBuilder allows for type-safe querying and joining of static structured data.
  */
-export class QueryBuilder<T extends SourceRecord> {
+export class QueryBuilder<T extends SourceRecord, TIndexKey extends string> {
   private joins: string[] = [];
   private filters: Filter[] = [];
-  private _orderByKey?: Fields<T> | "slug" = "slug";
+  private _orderByKey?: Fields<T> | TIndexKey | "slug" = "slug";
   private _orderByDirection: OrderByDirection = "asc";
   private _cursorValue?: string;
   private _cursorDirection: "after" | "before" = "after";
@@ -69,7 +63,7 @@ export class QueryBuilder<T extends SourceRecord> {
    * @param relationKey - Name of the relation as defined in the config.
    * @returns This instance (chainable).
    */
-  join<K extends JoinableKeys<T>>(relationKey: K): QueryBuilder<T> {
+  join<K extends JoinableKeys<T>>(relationKey: K): QueryBuilder<T, TIndexKey> {
     this.joins = [...this.joins, relationKey as string];
     return this;
   }
@@ -83,16 +77,20 @@ export class QueryBuilder<T extends SourceRecord> {
    * @returns This instance (chainable).
    */
   where(
-    field: Fields<T>,
+    field: Fields<T> | TIndexKey,
     op: "eq" | "startsWith",
     value: string
-  ): QueryBuilder<T>;
-  where(field: Fields<T>, op: "in", value: string[]): QueryBuilder<T>;
+  ): QueryBuilder<T, TIndexKey>;
   where(
-    field: Fields<T>,
+    field: Fields<T> | TIndexKey,
+    op: "in",
+    value: string[]
+  ): QueryBuilder<T, TIndexKey>;
+  where(
+    field: Fields<T> | TIndexKey,
     op: Operator,
     value: string | string[]
-  ): QueryBuilder<T> {
+  ): QueryBuilder<T, TIndexKey> {
     this.filters.push({ field, op, value } as Filter);
     return this;
   }
@@ -104,7 +102,10 @@ export class QueryBuilder<T extends SourceRecord> {
    * @param direction - Sort direction: "asc" or "desc". Default is "asc".
    * @returns This instance (for method chaining).
    */
-  orderBy(key: Fields<T>, direction: OrderByDirection = "asc"): this {
+  orderBy(
+    key: Fields<T> | TIndexKey,
+    direction: OrderByDirection = "asc"
+  ): this {
     this._orderByKey = key;
     this._orderByDirection = direction;
     return this;
@@ -149,7 +150,7 @@ export class QueryBuilder<T extends SourceRecord> {
 
     const { page, pageInfo } = await this.compose();
 
-    const slugs = page.flatMap((x) => Object.keys(x.r));
+    const slugs = page.flatMap((x) => Object.keys(x.ref));
     let data = (await this.loader.loadBySlugs(this.sourceName, slugs)) as T[];
     if (requiresJoin) data = await this.applyJoins(data, rsc);
 
@@ -188,9 +189,9 @@ export class QueryBuilder<T extends SourceRecord> {
     let page: PrefixIndexLine[];
     let pageInfo: PageInfo;
     const encodeCursorCallback = (item: PrefixIndexLine) => {
-      const refsLength = Object.keys(item.r).length;
-      const slug = Object.keys(item.r)[refsLength - 1];
-      const orderValue = Object.values(item.r)[refsLength - 1][orderByKey];
+      const refsLength = Object.keys(item.ref).length;
+      const slug = Object.keys(item.ref)[refsLength - 1];
+      const orderValue = Object.values(item.ref)[refsLength - 1][orderByKey];
 
       return encodeCursor({ order: { [orderByKey]: orderValue[0] }, slug });
     };
@@ -294,7 +295,7 @@ export class QueryBuilder<T extends SourceRecord> {
     const orderByKey = String(this._orderByKey);
 
     return matched.findIndex((item) => {
-      for (const [slug, values] of Object.entries(item.r)) {
+      for (const [slug, values] of Object.entries(item.ref)) {
         let match = slug === cursorObj.slug;
 
         if (orderByKey && cursorObj.order[orderByKey]) {
@@ -387,7 +388,7 @@ export class QueryBuilder<T extends SourceRecord> {
 
       foreignData = await this.loader.loadBySlugs(
         directRel.to,
-        uniqueIndexes.map((index) => Object.keys(index.r)).flat()
+        uniqueIndexes.map((index) => Object.keys(index.ref)).flat()
       );
     } else {
       // For hasOne and hasMany, localKey values are treated as slugs
@@ -449,7 +450,7 @@ export class QueryBuilder<T extends SourceRecord> {
 
     const throughData = await this.loader.loadBySlugs(
       rel.through,
-      uniqueSourceIndexes.map((index) => Object.keys(index.r)).flat()
+      uniqueSourceIndexes.map((index) => Object.keys(index.ref)).flat()
     );
 
     const targetSlugs = throughData.flatMap((t) =>
@@ -466,7 +467,7 @@ export class QueryBuilder<T extends SourceRecord> {
 
     const targetData = await this.loader.loadBySlugs(
       rel.to,
-      uniqueTargetIndexes.map((index) => Object.keys(index.r)).flat()
+      uniqueTargetIndexes.map((index) => Object.keys(index.ref)).flat()
     );
 
     return result.map((row) => {
@@ -515,8 +516,8 @@ export class QueryBuilder<T extends SourceRecord> {
           );
 
           const candidates = matched.filter((m) => {
-            const mSlug = Object.keys(m.r)[0];
-            const mField = m.r[mSlug]?.[field];
+            const mSlug = Object.keys(m.ref)[0];
+            const mField = m.ref[mSlug]?.[field];
             if (!mField) return false;
             return mField.some((p: string) =>
               op === "startsWith"
@@ -545,8 +546,8 @@ export class QueryBuilder<T extends SourceRecord> {
             // extract match
             entries.push(
               ...matched.filter((m) => {
-                const mSlug = Object.keys(m.r)[0];
-                return found.some((line) => !!line.r[mSlug]);
+                const mSlug = Object.keys(m.ref)[0];
+                return found.some((line) => !!line.ref[mSlug]);
               })
             );
           }
@@ -599,8 +600,8 @@ export class QueryBuilder<T extends SourceRecord> {
     const matchedArray = matched ?? [];
 
     matchedArray.sort((a, b) => {
-      const [, avs] = Object.entries(a.r)[0];
-      const [, bvs] = Object.entries(b.r)[0];
+      const [, avs] = Object.entries(a.ref)[0];
+      const [, bvs] = Object.entries(b.ref)[0];
       const av = String(avs[String(this._orderByKey)]);
       const bv = String(bvs[String(this._orderByKey)]);
       const aEmpty = av == null || av === "";

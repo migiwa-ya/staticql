@@ -50,7 +50,9 @@ export class StaticQL {
    * @param sourceName - Name of the source.
    * @returns A new QueryBuilder instance.
    */
-  from<T extends SourceRecord>(sourceName: string): QueryBuilder<T> {
+  from<T extends SourceRecord, TIndexKey extends string = keyof {}>(
+    sourceName: string
+  ): QueryBuilder<T, TIndexKey> {
     const sourceLoader = new SourceLoader<T>(
       this.repository,
       this.sourceConfigResolver,
@@ -64,7 +66,7 @@ export class StaticQL {
       this.logger
     );
 
-    return new QueryBuilder<T>(
+    return new QueryBuilder<T, TIndexKey>(
       sourceName,
       sourceLoader,
       indexer,

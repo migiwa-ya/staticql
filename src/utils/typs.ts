@@ -76,7 +76,7 @@ export type PrefixIndexDefinition = Record<
 export type PrefixIndexLine = {
   v: string;
   vs: string;
-  r: Record<string, Record<"slug" | string, string[]>>;
+  ref: Record<string, Record<"slug" | string, string[]>>;
 };
 
 // Un-normalized Prefix Index data

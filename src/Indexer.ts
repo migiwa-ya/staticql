@@ -176,7 +176,7 @@ export class Indexer {
 
               // extracts reference slugs
               const slugs = prefixIndexLine
-                .map((i) => Object.keys(i?.r))
+                .map((i) => Object.keys(i?.ref))
                 .flat();
 
               through = new Set(
@@ -210,7 +210,7 @@ export class Indexer {
 
               // extracts reference slugs
               const slugs = prefixIndexLine
-                .map((i) => Object.keys(i?.r))
+                .map((i) => Object.keys(i?.ref))
                 .flat();
 
               to = new Set(await this.sourceLoader.loadBySlugs(rel.to, slugs));
@@ -255,7 +255,9 @@ export class Indexer {
               .filter((i): i is PrefixIndexLine => !!i);
 
             // extracts reference slugs
-            const slugs = prefixIndexLine.map((i) => Object.keys(i?.r)).flat();
+            const slugs = prefixIndexLine
+              .map((i) => Object.keys(i?.ref))
+              .flat();
 
             const to = new Set(
               await this.sourceLoader.loadBySlugs(rel.to, slugs)
@@ -318,7 +320,7 @@ export class Indexer {
       const entries = this.createIndexLines(records, prefixes, rsc, entryGroup);
 
       for await (const [path, contents] of Array.from(entries)) {
-        let data: Set<{ v: string; vs: string; r: object }> = new Set();
+        let data: Set<PrefixIndexLine> = new Set();
         if (await this.repository.exists(path)) {
           const existedRaw = await this.repository.readFile(path);
           data = new Set(existedRaw.split("\n").map((raw) => JSON.parse(raw)));
@@ -329,7 +331,7 @@ export class Indexer {
             if (status === "A") {
               const same = [...data].find((e) => e.v === c.v && e.vs === c.vs);
               if (same) {
-                same.r = { ...same.r, ...c.r };
+                same.ref = { ...same.ref, ...c.ref };
               } else {
                 data.add(c);
               }
@@ -447,7 +449,10 @@ export class Indexer {
       )) {
         if (!countable && targetSlug) {
           if (
-            Object.prototype.hasOwnProperty.call(prefixIndexLine.r, targetSlug)
+            Object.prototype.hasOwnProperty.call(
+              prefixIndexLine.ref,
+              targetSlug
+            )
           ) {
             countable = true;
             continue;
@@ -501,7 +506,10 @@ export class Indexer {
       )) {
         if (!countable && targetSlug) {
           if (
-            Object.prototype.hasOwnProperty.call(prefixIndexLine.r, targetSlug)
+            Object.prototype.hasOwnProperty.call(
+              prefixIndexLine.ref,
+              targetSlug
+            )
           ) {
             countable = true;
             continue;
@@ -724,13 +732,13 @@ export class Indexer {
     const flattened: PrefixIndexLine[] = [];
 
     for (const item of unflattened) {
-      for (const [key, value] of Object.entries(item.r)) {
+      for (const [key, value] of Object.entries(item.ref)) {
         if (!seen.has(key)) {
           seen.add(key);
           flattened.push({
             v: item.v,
             vs: item.vs,
-            r: { [key]: value },
+            ref: { [key]: value },
           });
         }
       }
@@ -960,7 +968,7 @@ export class Indexer {
             const entry = {
               v: value,
               vs: refSlug,
-              r: mapSetToObject(new Map([[slug, prefixes.get(slug)!]])),
+              ref: mapSetToObject(new Map([[slug, prefixes.get(slug)!]])),
             };
 
             if (!entriesByStatus.has(path)) {

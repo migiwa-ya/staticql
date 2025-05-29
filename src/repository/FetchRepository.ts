@@ -171,7 +171,7 @@ export class FetchRepository implements StorageRepository {
           flattened.push({
             v: item.v,
             vs: item.vs,
-            r: { [key]: value },
+            ref: { [key]: value },
           });
         }
       }
