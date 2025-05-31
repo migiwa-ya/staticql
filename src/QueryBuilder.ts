@@ -96,6 +96,22 @@ export class QueryBuilder<T extends SourceRecord, TIndexKey extends string> {
   }
 
   /**
+   * Finds and returns a record by its slug.
+   * 
+   * @param slug The slug (unique identifier) of the record to retrieve.
+   * @returns The found record, with joins applied if necessary.
+   */
+  async find(slug: string) {
+    const rsc = this.resolver.resolveOne(this.sourceName);
+    const requiresJoin = this.joins.length > 0;
+
+    let data = (await this.loader.loadBySlug(this.sourceName, slug)) as T;
+    if (requiresJoin) data = (await this.applyJoins([data], rsc))[0];
+
+    return data;
+  }
+
+  /**
    * Specifies the sorting order for the query.
    *
    * @param key - Field to order by. Default is "slug".
