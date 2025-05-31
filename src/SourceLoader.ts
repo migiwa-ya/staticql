@@ -4,6 +4,7 @@ import type { StorageRepository } from "./repository/StorageRepository.js";
 import {
   ResolvedSourceConfig as RSC,
   SourceConfigResolver as Resolver,
+  SourceRecord,
 } from "./SourceConfigResolver.js";
 import { InMemoryCacheProvider } from "./cache/InMemoryCacheProvider.js";
 import { CacheProvider } from "./cache/CacheProvider.js";
@@ -11,7 +12,7 @@ import { CacheProvider } from "./cache/CacheProvider.js";
 /**
  * Responsible for loading and validating content from static sources.
  */
-export class SourceLoader<T> {
+export class SourceLoader<T extends SourceRecord> {
   private cache: CacheProvider;
 
   constructor(
@@ -93,16 +94,18 @@ export class SourceLoader<T> {
     }
 
     try {
-      const parsed = await this.parseFile(filePath, rsc);
+      const { parsed, raw } = await this.parseFile(filePath, rsc);
 
       if (Array.isArray(parsed)) {
         const found = parsed.find((item) => item && item.slug === slug);
         if (!found)
           throw new Error(`Slug '${slug}' not found in file: ${filePath}`);
         this.validator.validate(found, rsc.schema, rsc.name);
+        found.raw = raw;
         return found as T;
       } else {
         this.validator.validate(parsed, rsc.schema, rsc.name);
+        parsed.raw = raw;
         return parsed as T;
       }
     } catch (err) {
@@ -130,12 +133,15 @@ export class SourceLoader<T> {
    * @param filePath - Logical file path (may include pattern).
    * @param rsc - The resolved source configuration.
    * @param fullPath - Actual resolved file path.
-   * @returns Parsed and validated record(s).
+   * @returns Parsed and validated record and raw data.
    * @throws If the slug is inconsistent or unsupported type.
    */
-  private async parseFile(filePath: string, rsc: RSC): Promise<T> {
+  private async parseFile(
+    filePath: string,
+    rsc: RSC
+  ): Promise<{ parsed: T; raw: string }> {
     if (await this.cache.has(filePath)) {
-      const cached = await this.cache.get<T>(filePath);
+      const cached = await this.cache.get<{ parsed: T; raw: string }>(filePath);
       if (cached) return cached;
     }
 
@@ -162,20 +168,8 @@ export class SourceLoader<T> {
       parsed = parsedObj;
     }
 
-    await this.cache.set(filePath, parsed);
+    await this.cache.set(filePath, { parsed, raw });
 
-    return parsed as T;
-  }
-
-  /**
-   * Extracts the file extension from a path string.
-   *
-   * @param p - File path.
-   * @returns The extension (e.g., ".md", ".yaml").
-   */
-  private getExtname(p: string): string {
-    const i = p.lastIndexOf(".");
-    if (i === -1) return "";
-    return p.slice(i);
+    return { parsed, raw };
   }
 }

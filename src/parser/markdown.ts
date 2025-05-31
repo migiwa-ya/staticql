@@ -18,10 +18,7 @@ export function parseMarkdown({ rawContent }: { rawContent: string }) {
 
     // If the frontmatter is an array, use the first item as attributes
     attributes = Array.isArray(parsed) ? parsed[0] : parsed;
-
-    // Remove frontmatter section from content
-    body = rawContent.slice(frontmatterMatch[0].length);
   }
 
-  return { ...attributes, content: body };
+  return attributes;
 }

@@ -19,7 +19,7 @@ export function buildForeignKeyMap(
   data: SourceRecord[],
   foreignKeyPath: string
 ): Map<string, SourceRecord[]> {
-  const map = new Map<string, any[]>();
+  const map = new Map<string, SourceRecord[]>();
   for (const obj of data) {
     const values = resolveField(obj, foreignKeyPath);
     for (const v of values) {
@@ -68,15 +68,13 @@ export function resolveDirectRelation(
   rel: DirectRelation,
   foreignData: SourceRecord[],
   foreignMapOpt?: DirectRelationMap["foreignMap"]
-): any {
+): SourceRecord | SourceRecord[] | null {
   const foreignMap =
     foreignMapOpt ?? buildForeignKeyMap(foreignData, rel.foreignKey);
   const relType = rel.type;
-  const localKeys = resolveField(row, rel.localKey)
-    .filter((v): v is string => !!v)
-    .flat();
+  const localKeys = resolveField(row, rel.localKey).flat();
 
-  let matches: any[] = [];
+  let matches: SourceRecord[] = [];
   if (localKeys.length === 1) {
     for (const k of localKeys) {
       const arr = foreignMap.get(k);
@@ -84,12 +82,10 @@ export function resolveDirectRelation(
     }
   } else {
     matches = localKeys
-      .map((k: string) => findEntriesByPartialKey(foreignMap, k))
+      .map((k) => findEntriesByPartialKey(foreignMap, k))
       .flat()
-      .filter((v: any) => v);
+      .flat();
   }
-
-  matches = matches.flat()
 
   if (relType === "hasOne") {
     return matches.length > 0 ? matches[0] : null;
@@ -115,7 +111,7 @@ export function resolveThroughRelation(
   targetData: SourceRecord[],
   targetMapOpt?: ThroughRelationMap["targetMap"],
   throughMapOpt?: ThroughRelationMap["targetMap"]
-): any {
+): SourceRecord | SourceRecord[] | null {
   const sourceKeys = resolveField(row, rel.sourceLocalKey).flat();
 
   const throughMap: Map<string, SourceRecord[]> =
@@ -125,19 +121,19 @@ export function resolveThroughRelation(
     targetMapOpt ?? buildForeignKeyMap(targetData, rel.targetForeignKey);
 
   const throughRecords: SourceRecord[] = sourceKeys
-    .map((k: string) => throughMap.get(k))
-    .filter((v: any): v is SourceRecord[] => !!v)
+    .map((k) => throughMap.get(k))
+    .filter((v): v is SourceRecord[] => !!v)
     .filter(Boolean)
     .flat();
 
   const targets = throughRecords
-    .map((t: any) => {
+    .map((t) => {
       const throughLocalKeys = resolveField(t, rel.throughLocalKey)
         .filter((v): v is string => !!v)
         .flat();
       return throughLocalKeys
-        .map((k: string) => targetMap.get(k))
-        .filter((v: any): v is SourceRecord[] => !!v)
+        .map((k) => targetMap.get(k))
+        .filter((v): v is SourceRecord[] => !!v)
         .flat();
     })
     .flat();

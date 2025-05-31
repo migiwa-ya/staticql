@@ -8,6 +8,7 @@ import { JSONSchema7 } from "./validator/Validator.js";
  */
 export type SourceRecord = {
   slug: string;
+  raw: string;
   [key: string]: any;
 };
 

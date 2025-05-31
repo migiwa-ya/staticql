@@ -10,55 +10,34 @@ export type JoinableKeys<T> = {
 // Nest traversal depth limiter
 type Prev = [never, 0, 1, 2, 3, 4, 5];
 
+type IsAny<T> = 0 extends 1 & T ? true : false;
+
 // Recursively extract dot-notated nested keys
-export type NestedKeys<
+type NestedIndexKeys<
   T,
   Prefix extends string = "",
   Depth extends number = 3
 > = [Depth] extends [never]
   ? never
+  : T extends (infer U)[]
+  ? NestedIndexKeys<U, Prefix, Depth>
   : T extends object
   ? {
-      [K in keyof T]: NonNullable<T[K]> extends object
-        ? NestedKeys<
+      [K in keyof T]: NonNullable<T[K]> extends { __brand: "index" }
+        ? IsAny<T[K]> extends true
+          ? never
+          : `${Prefix}${Prefix extends "" ? "" : "."}${Extract<K, string>}`
+        : NonNullable<T[K]> extends object
+        ? NestedIndexKeys<
             NonNullable<T[K]>,
             `${Prefix}${Prefix extends "" ? "" : "."}${Extract<K, string>}`,
             Prev[Depth]
           >
-        : K extends "__brand"
-        ? never
-        : `${Prefix}${Prefix extends "" ? "" : "."}${Extract<K, string>}`;
+        : never;
     }[keyof T]
   : never;
 
-// Extract queryable fields (excluding relations)
-export type SourceFields<T> = {
-  [K in keyof T]: NonNullable<T[K]> extends SourceRecord | SourceRecord[]
-    ? never
-    : NonNullable<T[K]> extends (infer U)[]
-    ? U extends object
-      ? NestedKeys<U, Extract<K, string>>
-      : K
-    : NonNullable<T[K]> extends object
-    ? NestedKeys<NonNullable<T[K]>, Extract<K, string>>
-    : K;
-}[keyof T];
-
-// Extract fields from relational records
-export type RelationalFields<T> = {
-  [K in keyof T]: NonNullable<T[K]> extends SourceRecord | SourceRecord[]
-    ? NonNullable<T[K]> extends (infer U)[]
-      ? U extends object
-        ? NestedKeys<U, Extract<K, string>>
-        : never
-      : NonNullable<T[K]> extends object
-      ? NestedKeys<NonNullable<T[K]>, Extract<K, string>>
-      : never
-    : K;
-}[keyof T];
-
-// All queryable fields
-export type Fields<T> = RelationalFields<T> | SourceFields<T>;
+export type Fields<T> = NestedIndexKeys<T>;
 
 // Directory depth of Prefix Index
 export type PrefixIndexDepth = 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
