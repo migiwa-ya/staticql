@@ -165,6 +165,10 @@ export function parseYAML({ rawContent }: { rawContent: string }): any {
         .filter((s) => s.length > 0);
     }
 
+    if (val === 'null') return null;
+
+    if (val === '') return undefined;
+
     return val;
   }
 

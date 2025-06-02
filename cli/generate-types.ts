@@ -186,7 +186,7 @@ function generateTypeDefs(config: StaticQLConfig): string {
   if (sourceTypeMapEntries.length > 0) {
     typeDefs += `export type SourceTypeMap = {\n${sourceTypeMapEntries.join(
       "\n"
-    )}\n};\n\n`;
+    )}\n};\n`;
   }
 
   return typeDefs;

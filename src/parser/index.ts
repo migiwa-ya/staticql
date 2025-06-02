@@ -1,4 +1,4 @@
-import { parseMarkdown } from "./markdown.js";
+import { parseFrontMatter } from "./frontMatter.js";
 import { parseYAML } from "./yaml.js";
 import { parseJSON } from "./json.js";
 
@@ -43,7 +43,7 @@ export async function parseByType(
 
   switch (type) {
     case "markdown":
-      return parseMarkdown({ rawContent });
+      return parseFrontMatter({ rawContent });
     case "yaml":
       return parseYAML({ rawContent });
     case "json":

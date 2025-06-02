@@ -8,10 +8,9 @@ import { parseYAML } from "./yaml.js";
  * @param rawContent - The raw Markdown string to parse.
  * @returns An object containing parsed frontmatter fields and the remaining Markdown body as `content`.
  */
-export function parseMarkdown({ rawContent }: { rawContent: string }) {
+export function parseFrontMatter({ rawContent }: { rawContent: string }) {
   const frontmatterMatch = rawContent.match(/^---\s*\n([\s\S]*?)\n---\s*\n?/);
   let attributes: Record<string, any> = {};
-  let body = rawContent;
 
   if (frontmatterMatch) {
     const parsed = parseYAML({ rawContent: frontmatterMatch[1] });

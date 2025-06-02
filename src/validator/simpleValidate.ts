@@ -10,8 +10,11 @@
 export function simpleValidate(
   data: any,
   schema: any,
-  path: string = ""
+  path: string = "",
+  originData: string | null = null
 ): void {
+  if (!originData) originData = JSON.stringify(data);
+
   const expectedType = schema.type;
 
   if (!expectedType) return;
@@ -24,7 +27,9 @@ export function simpleValidate(
   if (data === null) {
     if (!types.includes("null")) {
       throw new Error(
-        `Expected ${types.join(" or ")} at '${fullPath}', got null`
+        `Expected ${types.join(
+          " or "
+        )} at '${fullPath}', got null, at: ${originData}`
       );
     }
     return;
@@ -33,7 +38,9 @@ export function simpleValidate(
   // Handle arrays
   if (types.includes("array")) {
     if (!Array.isArray(data)) {
-      throw new Error(`Expected array at '${fullPath}', got ${typeof data}`);
+      throw new Error(
+        `Expected array at '${fullPath}', got ${typeof data}, at: ${originData}`
+      );
     }
     if (schema.items) {
       for (let i = 0; i < data.length; i++) {
@@ -51,14 +58,16 @@ export function simpleValidate(
 
     for (const key of schema.required ?? []) {
       if (!(key in data)) {
-        throw new Error(`Missing required field: '${fullPath}.${key}'`);
+        throw new Error(
+          `Missing required field: '${fullPath}.${key}', at: ${originData}`
+        );
       }
     }
 
     for (const [key, propSchema] of Object.entries(schema.properties ?? {})) {
       const val = data[key];
       if (val !== undefined) {
-        simpleValidate(val, propSchema, `${fullPath}.${key}`);
+        simpleValidate(val, propSchema, `${fullPath}.${key}`, originData);
       }
     }
     return;
@@ -98,7 +107,9 @@ export function simpleValidate(
 
   if (!valid) {
     throw new Error(
-      `Expected ${types.join(" or ")} at '${fullPath}', got ${actualType}`
+      `Expected ${types.join(
+        " or "
+      )} at '${fullPath}', got ${actualType}, at: ${originData}`
     );
   }
 }
