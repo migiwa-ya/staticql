@@ -25,12 +25,11 @@ export interface SourceConfig {
   pattern: string;
   schema: JSONSchema7;
   relations?: Record<string, Relation>;
-  index?: (string | { [field: string]: { indexDepth?: PrefixIndexDepth } })[];
-  customIndex?: (
-    | string
-    | { [field: string]: { indexDepth?: PrefixIndexDepth } }
-  )[];
+  index?: IndexDefinition;
+  customIndex?: IndexDefinition;
 }
+
+type IndexDefinition = Record<string, { indexDepth?: PrefixIndexDepth }>;
 
 /**
  * Internally resolved and enriched source configuration.
@@ -119,14 +118,9 @@ export class SourceConfigResolver {
       },
     };
 
-    if (Array.isArray(source.index)) {
-      for (const field of source.index) {
-        const fieldName =
-          typeof field === "object" ? Object.keys(field)[0] : field;
-        const depth =
-          typeof field === "object"
-            ? field[fieldName]["indexDepth"] ?? Indexer.indexDepth
-            : Indexer.indexDepth;
+    if (source.index) {
+      for (const [fieldName, definition] of Object.entries(source.index)) {
+        const depth = definition["indexDepth"] ?? Indexer.indexDepth;
 
         if (!this.isDepthInRange(depth)) throw new Error("");
 
@@ -186,14 +180,11 @@ export class SourceConfigResolver {
     }
 
     // resolve customIndexes
-    if (Array.isArray(source.customIndex)) {
-      for (const field of source.customIndex) {
-        const fieldName =
-          typeof field === "object" ? Object.keys(field)[0] : field;
-        const depth =
-          typeof field === "object"
-            ? field[fieldName]["indexDepth"] ?? Indexer.indexDepth
-            : Indexer.indexDepth;
+    if (source.customIndex) {
+      for (const [fieldName, definition] of Object.entries(
+        source.customIndex
+      )) {
+        const depth = definition["indexDepth"] ?? Indexer.indexDepth;
 
         if (!this.isDepthInRange(depth)) throw new Error("");
 
@@ -236,7 +227,7 @@ export class SourceConfigResolver {
    * Check depth in range.
    */
   private isDepthInRange(n: number): n is PrefixIndexDepth {
-    return n >= 2 && n <= 10;
+    return n >= 1 && n <= 10;
   }
 
   /**

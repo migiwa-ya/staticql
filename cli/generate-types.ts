@@ -85,26 +85,14 @@ function generateTypeDefs(config: StaticQLConfig): string {
     const customIndexFieldNames: Set<string> = new Set();
 
     if (sourceDef.index) {
-      for (const field of sourceDef.index) {
-        if (typeof field === "string") {
-          indexFieldNames.add(field);
-        } else if (typeof field === "object" && field !== null) {
-          for (const [key] of Object.entries(field)) {
-            indexFieldNames.add(key);
-          }
-        }
+      for (const [fieldName] of Object.entries(sourceDef.index)) {
+        indexFieldNames.add(fieldName);
       }
     }
 
     if (sourceDef.customIndex) {
-      for (const field of sourceDef.customIndex) {
-        if (typeof field === "string") {
-          customIndexFieldNames.add(field);
-        } else if (typeof field === "object" && field !== null) {
-          for (const [key] of Object.entries(field)) {
-            customIndexFieldNames.add(key);
-          }
-        }
+      for (const [fieldName] of Object.entries(sourceDef.customIndex)) {
+        customIndexFieldNames.add(fieldName);
       }
     }
 

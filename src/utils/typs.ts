@@ -40,7 +40,7 @@ type NestedIndexKeys<
 export type Fields<T> = NestedIndexKeys<T>;
 
 // Directory depth of Prefix Index
-export type PrefixIndexDepth = 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+export type PrefixIndexDepth = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 
 // Prefix Index Definition for staticql.config.json
 export type PrefixIndexDefinition = Record<

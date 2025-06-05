@@ -555,17 +555,20 @@ export class Indexer {
    */
   private async findFirstIndexPath(dir: string): Promise<string> {
     const prefixIndexPath = toP(dir);
+    let prefix: string;
 
     let stream: ReadableStream;
     try {
       stream = await this.repository.openFileStream(prefixIndexPath);
+
+      const reader = stream.getReader();
+      const decoder = new TextDecoder();
+
+      const { value } = await readListStream(reader, decoder).next();
+      prefix = value;
     } catch {
       return toI(dir);
     }
-    const reader = stream.getReader();
-    const decoder = new TextDecoder();
-
-    const { value: prefix } = await readListStream(reader, decoder).next();
 
     return this.findFirstIndexPath(joinPath(dir, prefix));
   }
@@ -1208,28 +1211,32 @@ export class Indexer {
     let found: boolean | null = null;
 
     finder: for await (const indexPathEntry of gen(tail(indexPath).base)) {
-      const stream = await repository.openFileStream(indexPathEntry);
-      const reader = stream.getReader();
-      const decoder = new TextDecoder();
+      try {
+        const stream = await repository.openFileStream(indexPathEntry);
+        const reader = stream.getReader();
+        const decoder = new TextDecoder();
 
-      for await (const entry of readJsonlStream<PrefixIndexLine>(
-        reader,
-        decoder
-      )) {
-        if (filterCallback(entry.v, value)) {
-          result.add(entry);
-          found = true;
-        } else if (found === true) {
-          found = false;
+        for await (const entry of readJsonlStream<PrefixIndexLine>(
+          reader,
+          decoder
+        )) {
+          if (filterCallback(entry.v, value)) {
+            result.add(entry);
+            found = true;
+          } else if (found === true) {
+            found = false;
+          }
+          if (found === false) {
+            await reader.cancel();
+            break finder;
+          }
         }
-        if (found === false) {
-          await reader.cancel();
-          break finder;
-        }
+
+        // if result is empty before walk next index, no there more
+        if (!result.size) break;
+      } catch {
+        break finder;
       }
-
-      // if result is empty before walk next index, no there more
-      if (!result.size) break;
     }
 
     return this.flatPrefixIndexLine([...result]);
