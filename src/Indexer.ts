@@ -556,18 +556,16 @@ export class Indexer {
   private async findFirstIndexPath(dir: string): Promise<string> {
     const prefixIndexPath = toP(dir);
 
-    if (!(await this.repository.exists(prefixIndexPath))) {
+    let stream: ReadableStream;
+    try {
+      stream = await this.repository.openFileStream(prefixIndexPath);
+    } catch {
       return toI(dir);
     }
-
-    const stream = await this.repository.openFileStream(prefixIndexPath);
     const reader = stream.getReader();
     const decoder = new TextDecoder();
 
-    const { value: prefix, done } = await readListStream(
-      reader,
-      decoder
-    ).next();
+    const { value: prefix } = await readListStream(reader, decoder).next();
 
     return this.findFirstIndexPath(joinPath(dir, prefix));
   }
@@ -579,11 +577,12 @@ export class Indexer {
     const prefixIndexPath = toP(dir);
     let prefix: string = "";
 
-    if (!(await this.repository.exists(prefixIndexPath))) {
+    let stream: ReadableStream;
+    try {
+      stream = await this.repository.openFileStream(prefixIndexPath);
+    } catch {
       return toI(dir);
     }
-
-    const stream = await this.repository.openFileStream(prefixIndexPath);
     const reader = stream.getReader();
     const decoder = new TextDecoder();
 
@@ -608,40 +607,46 @@ export class Indexer {
       dir: string,
       visited: Set<string> = new Set()
     ): AsyncGenerator<string> {
-      if (!visited.has(toP(dir)) && (await repository.exists(toP(dir)))) {
-        const stream = await repository.openFileStream(toP(dir));
-        const reader = stream.getReader();
-        const decoder = new TextDecoder();
+      if (!visited.has(toP(dir))) {
+        try {
+          const stream = await repository.openFileStream(toP(dir));
+          const reader = stream.getReader();
+          const decoder = new TextDecoder();
 
-        // record visits that prefixes path
-        visited.add(toP(dir));
+          // record visits that prefixes path
+          visited.add(toP(dir));
 
-        // record visits that include index directories
-        visited.add(dir);
+          // record visits that include index directories
+          visited.add(dir);
 
-        for await (let prefix of readListStream(reader, decoder)) {
-          if (!visitable && visited.has(joinPath(dir, prefix))) {
-            visitable = true;
+          for await (let prefix of readListStream(reader, decoder)) {
+            if (!visitable && visited.has(joinPath(dir, prefix))) {
+              visitable = true;
+            }
+
+            if (visitable) {
+              yield* walk(joinPath(dir, prefix), visited);
+            }
           }
-
-          if (visitable) {
-            yield* walk(joinPath(dir, prefix), visited);
-          }
+        } catch {
+          // record visits that include index directories
+          visited.add(dir);
         }
-      } else if (
-        !visited.has(toI(dir)) &&
-        (await repository.exists(toI(dir)))
-      ) {
-        yield toI(dir);
+      }
+      if (!visited.has(toI(dir))) {
+        try {
+          await repository.openFileStream(toI(dir));
+          yield toI(dir);
 
-        // record visits that index path
-        visited.add(toI(dir));
+          // record visits that index path
+          visited.add(toI(dir));
 
-        // record visits that include index directories
-        visited.add(dir);
-      } else {
-        // record visits that include index directories
-        visited.add(dir);
+          // record visits that include index directories
+          visited.add(dir);
+        } catch {
+          // record visits that include index directories
+          visited.add(dir);
+        }
       }
 
       if (!visited.has(tail(dir).base)) {
@@ -669,46 +674,49 @@ export class Indexer {
       dir: string,
       visited: Set<string> = new Set()
     ): AsyncGenerator<string> {
-      if (!visited.has(toP(dir)) && (await repository.exists(toP(dir)))) {
-        const stream = await repository.openFileStream(toP(dir));
-        const reader = stream.getReader();
-        const decoder = new TextDecoder();
-        const buff: Set<string> = new Set();
+      if (!visited.has(toP(dir))) {
+        try {
+          const stream = await repository.openFileStream(toP(dir));
+          const reader = stream.getReader();
+          const decoder = new TextDecoder();
+          const buff: Set<string> = new Set();
 
-        // record visits that prefixes path
-        visited.add(toP(dir));
+          visited.add(toP(dir));
+          visited.add(dir);
 
-        // record visits that include index directories
-        visited.add(dir);
-
-        // buffer for desc
-        for await (const prefix of readListStream(reader, decoder)) {
-          buff.add(prefix);
-        }
-
-        for (const prefix of [...buff].reverse()) {
-          if (!visitable && visited.has(joinPath(dir, prefix))) {
-            visitable = true;
+          for await (const prefix of readListStream(reader, decoder)) {
+            buff.add(prefix);
           }
 
-          if (visitable) {
-            yield* walk(joinPath(dir, prefix), visited);
+          for (const prefix of [...buff].reverse()) {
+            if (!visitable && visited.has(joinPath(dir, prefix))) {
+              visitable = true;
+            }
+
+            if (visitable) {
+              yield* walk(joinPath(dir, prefix), visited);
+            }
           }
+        } catch {
+          // record visits that include index directories
+          visited.add(dir);
         }
-      } else if (
-        !visited.has(toI(dir)) &&
-        (await repository.exists(toI(dir)))
-      ) {
-        yield toI(dir);
+      }
 
-        // record visits that index path
-        visited.add(toI(dir));
+      if (!visited.has(toI(dir))) {
+        try {
+          await repository.openFileStream(toI(dir));
+          yield toI(dir);
 
-        // record visits that include index directories
-        visited.add(dir);
-      } else {
-        // record visits that include index directories
-        visited.add(dir);
+          // record visits that index path
+          visited.add(toI(dir));
+
+          // record visits that include index directories
+          visited.add(dir);
+        } catch {
+          // record visits that include index directories
+          visited.add(dir);
+        }
       }
 
       if (!visited.has(tail(dir).base)) {
