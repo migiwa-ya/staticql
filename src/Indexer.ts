@@ -24,7 +24,12 @@ import { CacheProvider } from "./cache/CacheProvider.js";
 import { InMemoryCacheProvider } from "./cache/InMemoryCacheProvider.js";
 
 // represents a file diff entry (for incremental index updates).
-export type DiffEntry = { status: "A" | "D"; source: string; slug: string };
+export type DiffEntry = {
+  status: "A" | "D" | "M";
+  source: string;
+  slug: string;
+  fields?: Record<string, unknown>;
+};
 // TODO: M, R statuses
 // | { status: "M"; source: string; slug: string; field: string }
 // | { status: "R"; source: string; slug: string; oldSlug: string };
@@ -131,20 +136,53 @@ export class Indexer {
       }
     }
 
+    const diffMap = new Map<string, Map<string, DiffEntry>>();
+    for (const e of diffEntries) {
+      if (!diffMap.has(e.source)) diffMap.set(e.source, new Map());
+      diffMap.get(e.source)!.set(e.slug, e);
+    }
+
     const dataMap = new Map<string, Set<SourceRecord>>();
+
     for (const [source, entries] of entryGroup.entries()) {
       const rsc = this.resolver.resolveOne(source);
-
-      // unnecessary creat index
       if (!rsc.indexes) continue;
 
-      for (const [_, payloads] of entries.entries()) {
-        const slugs = [...payloads].map((p) => p.slug);
-        const sources = await this.sourceLoader.loadBySlugs(source, slugs);
+      /* --- 1. D / A+M を分離 ------------------------------------ */
+      const addOrMod = entries.get("A") ?? new Set();
+      (entries.get("M") ?? new Set()).forEach((p) => addOrMod.add(p));
+      const delOnly = entries.get("D") ?? new Set();
 
-        if (!dataMap.has(rsc.name)) dataMap.set(rsc.name, new Set());
-        sources.map((s) => dataMap.get(rsc.name)?.add(s));
+      const slugsToLoad = [...addOrMod].map((p) => p.slug);
+
+      /* --- 2. 実ファイルをロード (存在する想定だけ) -------------- */
+      const loaded = await this.sourceLoader.loadBySlugs(source, slugsToLoad);
+
+      if (!dataMap.has(rsc.name)) dataMap.set(rsc.name, new Set());
+
+      /* 2-A. 取得できたレコードはそのまま */
+      loaded.forEach((rec) => dataMap.get(rsc.name)!.add(rec));
+
+      const loadedSlugs = new Set(loaded.map((r) => r.slug));
+
+      /* 2-B. 取得できなかった slug は擬似レコード */
+      for (const slug of slugsToLoad) {
+        if (loadedSlugs.has(slug)) continue; // 取れている
+        const diff = diffMap.get(source)!.get(slug);
+        if (!diff) continue; // 保険
+        dataMap.get(rsc.name)!.add(makePseudo(diff));
       }
+
+      /* --- 3. 削除 (D) は必ず擬似レコード ----------------------- */
+      for (const { slug } of delOnly) {
+        const diff = diffMap.get(source)!.get(slug);
+        if (!diff) continue;
+        dataMap.get(rsc.name)!.add(makePseudo(diff));
+      }
+    }
+
+    function makePseudo(diff: DiffEntry): SourceRecord {
+      return { slug: diff.slug, ...diff.fields } as SourceRecord;
     }
 
     const relationMaps: RelationMaps = {};
@@ -154,6 +192,8 @@ export class Indexer {
 
       for (const [key, rel] of Object.entries(relations)) {
         if (this.isThroughRelation(rel)) {
+          // is through relation
+
           if (!dataMap.get(rel.to)) {
             let through = dataMap.get(rel.through);
             if (!through) {
@@ -236,13 +276,11 @@ export class Indexer {
             ),
           };
         } else {
+          // is direct relation
+
           if (!dataMap.get(rel.to)) {
             const localKeys = [...data]
-              .map((s): string[] =>
-                Array.isArray(s[rel.localKey])
-                  ? s[rel.localKey]
-                  : [s[rel.localKey]]
-              )
+              .map((s): string[] => resolveField(s, rel.localKey))
               .flat();
             const prefixIndexLine = (
               await Promise.all(

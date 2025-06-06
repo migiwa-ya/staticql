@@ -131,17 +131,20 @@ export class SourceConfigResolver {
       }
     }
 
-    const relationalSources = Object.entries(this.sources)
-      .filter(([name]) => name !== sourceName)
-      .map(([_, source]) =>
-        Object.entries(source.relations ?? {}).find(([_, rel]) =>
-          this.isThroughRelation(rel)
-            ? rel.to === sourceName || rel.through === sourceName
-            : rel.to === sourceName
+    const relationalSources = [
+      ...Object.entries(this.sources)
+        .filter(([name]) => name !== sourceName)
+        .map(([_, source]) =>
+          Object.entries(source.relations ?? {}).find(([_, rel]) =>
+            this.isThroughRelation(rel)
+              ? rel.to === sourceName || rel.through === sourceName
+              : rel.to === sourceName
+          )
         )
-      )
-      .filter(Boolean)
-      .filter((e): e is [string, Relation] => !!e);
+        .filter(Boolean)
+        .filter((e): e is [string, Relation] => !!e),
+      ...Object.entries(source.relations ?? {}),
+    ];
 
     if (relationalSources) {
       for (const [_, rel] of relationalSources) {
@@ -153,17 +156,24 @@ export class SourceConfigResolver {
           rel.type === "hasOne" ||
           rel.type === "hasMany"
         ) {
-          fieldNames.push(rel.foreignKey === "slug" ? null : rel.foreignKey);
+          if (rel.to === sourceName) {
+            fieldNames.push(rel.foreignKey === "slug" ? null : rel.foreignKey);
+          } else {
+            fieldNames.push(rel.localKey === "slug" ? null : rel.localKey);
+          }
         } else if (
           rel.type === "hasOneThrough" ||
           rel.type === "hasManyThrough"
         ) {
-          fieldNames.push(
-            rel.targetForeignKey === "slug" ? null : rel.targetForeignKey
-          );
-          fieldNames.push(
-            rel.throughForeignKey === "slug" ? null : rel.throughForeignKey
-          );
+          if (rel.to === sourceName) {
+            fieldNames.push(
+              rel.throughForeignKey === "slug" ? null : rel.throughForeignKey
+            );
+          } else {
+            fieldNames.push(
+              rel.targetForeignKey === "slug" ? null : rel.targetForeignKey
+            );
+          }
         }
 
         if (!fieldNames.length) continue;
@@ -298,5 +308,35 @@ export class SourceConfigResolver {
       : filePath;
     if (rel.startsWith("/")) rel = rel.slice(1);
     return this.pathToSlug(rel.replace(ext, ""));
+  }
+
+  static patternTest(pattern: string, filePath: string): boolean {
+    return this.globToRegExp(pattern).test(filePath);
+  }
+
+  private static globToRegExp(glob: string): RegExp {
+    const p = glob.replace(/\\/g, "/");
+
+    let re = "^";
+    let i = 0;
+    while (i < p.length) {
+      const c = p[i];
+
+      if (c === "*") {
+        if (p[i + 1] === "*") {
+          i++;
+          const isSlash = p[i + 1] === "/";
+          if (isSlash) i++;
+          re += isSlash ? "(?:[^/]+/)*" : "(?:[^/]+/)*[^/]*";
+        } else {
+          re += "[^/]*";
+        }
+      } else {
+        re += c.replace(/[$^+.()|{}]/g, "\\$&");
+      }
+      i++;
+    }
+    re += "$";
+    return new RegExp(re);
   }
 }
