@@ -621,13 +621,14 @@ export class Indexer {
     let stream: ReadableStream;
     try {
       stream = await this.repository.openFileStream(prefixIndexPath);
+
+      const reader = stream.getReader();
+      const decoder = new TextDecoder();
+
+      for await (prefix of readListStream(reader, decoder));
     } catch {
       return toI(dir);
     }
-    const reader = stream.getReader();
-    const decoder = new TextDecoder();
-
-    for await (prefix of readListStream(reader, decoder));
 
     return this.findLastIndexPath(joinPath(dir, prefix));
   }
@@ -676,7 +677,7 @@ export class Indexer {
       }
       if (!visited.has(toI(dir))) {
         try {
-          await repository.openFileStream(toI(dir));
+          await repository.readFile(toI(dir));
           yield toI(dir);
 
           // record visits that index path
@@ -746,7 +747,7 @@ export class Indexer {
 
       if (!visited.has(toI(dir))) {
         try {
-          await repository.openFileStream(toI(dir));
+          await repository.readFile(toI(dir));
           yield toI(dir);
 
           // record visits that index path
