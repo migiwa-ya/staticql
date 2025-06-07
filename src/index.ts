@@ -36,4 +36,3 @@ export type { Validator } from "./validator/Validator.js";
 export { ConsoleLogger } from "./logger/ConsoleLogger.js";
 export type { PageInfo } from "./utils/pagenation.js";
 export type { DiffEntry } from "./Indexer.js";
-export { extractDiff } from "./diff/extractDiff.js";
