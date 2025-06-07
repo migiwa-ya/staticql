@@ -1,20 +1,19 @@
 import { execSync } from "child_process";
-import fs from "fs";
 import path from "path";
-import { parseByType } from "../parser";
-import { DiffEntry, StaticQLConfig, Validator } from "../index";
+import { parseByType } from "../parser/index.js";
+import { DiffEntry, StaticQLConfig, Validator } from "../index.js";
 import {
   SourceConfigResolver as Resolver,
   ResolvedSourceConfig,
-} from "../SourceConfigResolver";
-import { resolveField } from "../utils/field";
-import { asArray } from "../utils/normalize";
-import { SourceLoader } from "../SourceLoader";
-import { FsRepository } from "../repository/FsRepository";
-import { defaultValidator } from "../validator/defaultValidator";
+} from "../SourceConfigResolver.js";
+import { resolveField } from "../utils/field.js";
+import { asArray } from "../utils/normalize.js";
+import { SourceLoader } from "../SourceLoader.js";
+import { FsRepository } from "../repository/FsRepository.js";
+import { defaultValidator } from "../validator/defaultValidator.js";
 
 export interface ExtractDiffOpts {
-  contentDir: string;
+  baseDir: string;
   config: StaticQLConfig;
   customIndexers?: Record<string, (rec: any) => unknown>;
   validator?: Validator;
@@ -28,7 +27,7 @@ export async function extractDiff(opts: ExtractDiffOpts): Promise<DiffEntry[]> {
   const resolver = new Resolver(config.sources);
   const resolved = resolver.resolveAll();
   const results: DiffEntry[] = [];
-  const repository = new FsRepository(opts.contentDir);
+  const repository = new FsRepository(opts.baseDir);
   const loader = new SourceLoader(
     repository,
     resolver,
@@ -71,12 +70,12 @@ export async function extractDiff(opts: ExtractDiffOpts): Promise<DiffEntry[]> {
   for (const line of diffLines) {
     const [stat, filePath] = line.split(/\t/);
     const filePathBase = Resolver.extractBaseDir(
-      filePath.replace(`${opts.contentDir}/`, "")
+      filePath.replace(/\/$/, "").replace(`${opts.baseDir}`, "")
     );
 
-    const rsc = resolved.find((s) =>
-      Resolver.patternTest(s.pattern, filePathBase)
-    );
+    const rsc = resolved.find((s) => {
+      return Resolver.patternTest(s.pattern, filePathBase);
+    });
 
     if (!rsc) continue;
 

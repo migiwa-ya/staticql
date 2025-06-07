@@ -123,8 +123,9 @@ export class Indexer {
    *
    * @param diffEntries - List of file change entries.
    */
-  async updateIndexesForFiles(diffEntries: DiffEntry[]): Promise<void> {
+  async updateIndexesForFiles(diffEntries: DiffEntry[]): Promise<string[]> {
     const entryGroup: EntryGroup = new Map();
+    const touched: string[] = [];
 
     for (const entry of diffEntries) {
       if (entry.status === "A" || entry.status === "D") {
@@ -387,8 +388,10 @@ export class Indexer {
 
             if (!raw.length) {
               this.repository.removeDir(toParent(path));
+              touched.push(path);
             } else {
               this.repository.writeFile(path, raw);
+              touched.push(path);
             }
           }
         }
@@ -415,6 +418,7 @@ export class Indexer {
                 .join("\n");
 
               this.repository.writeFile(path, raw);
+              touched.push(path);
             } else {
               const raw = [...value]
                 .sort((a, b) => a.localeCompare(b))
@@ -422,6 +426,7 @@ export class Indexer {
                 .join("\n");
 
               this.repository.writeFile(path, raw);
+              touched.push(path);
             }
           } else if (status === "D") {
             const existsRaw = await this.repository.readFile(path);
@@ -436,15 +441,19 @@ export class Indexer {
 
             if (existed.size === 0) {
               await this.repository.removeDir(toParent(path));
+              touched.push(path);
             } else {
               const raw = [...existed].join("\n");
 
               await this.repository.writeFile(path, raw);
+              touched.push(path);
             }
           }
         }
       }
     }
+
+    return touched;
   }
 
   /**
