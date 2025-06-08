@@ -53,7 +53,7 @@ export type ThroughRelationMap = {
  */
 export class Indexer {
   public static indexPrefix = "index";
-  public static indexDepth: PrefixIndexDepth = 2;
+  public static indexDepth: PrefixIndexDepth = 1;
 
   private cache: CacheProvider;
   private customIndexers: Record<

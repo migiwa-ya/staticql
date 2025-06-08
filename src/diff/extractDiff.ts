@@ -13,6 +13,8 @@ import { FsRepository } from "../repository/FsRepository.js";
 import { defaultValidator } from "../validator/defaultValidator.js";
 
 export interface ExtractDiffOpts {
+  baseRef: string;
+  headRef: string;
   baseDir: string;
   config: StaticQLConfig;
   customIndexers?: Record<string, (rec: any) => unknown>;
@@ -21,8 +23,8 @@ export interface ExtractDiffOpts {
 
 export async function extractDiff(opts: ExtractDiffOpts): Promise<DiffEntry[]> {
   const { config, customIndexers = {} } = opts;
-  const baseRef = "origin/main";
-  const headRef = "HEAD";
+  const baseRef = opts.baseRef ?? "origin/main";
+  const headRef = opts.headRef ?? "HEAD";
 
   const resolver = new Resolver(config.sources);
   const resolved = resolver.resolveAll();
