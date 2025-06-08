@@ -73,7 +73,7 @@ export async function extractDiff(opts: ExtractDiffOpts): Promise<DiffEntry[]> {
     const [stat, filePath] = line.split(/\t/);
     const filePathBase = Resolver.extractBaseDir(
       filePath.replace(/\/$/, "").replace(`${opts.baseDir}`, "")
-    );
+    ).replace(/^\//, "");
 
     const rsc = resolved.find((s) => {
       return Resolver.patternTest(s.pattern, filePathBase);
