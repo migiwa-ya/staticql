@@ -1,6 +1,7 @@
 import { SourceConfigResolver } from "./SourceConfigResolver.js";
 import { StaticQL, StaticQLConfig, StaticQLInitOptions } from "./StaticQL.js";
 import { StorageRepository } from "./repository/StorageRepository.js";
+import { MultiRepository } from "./repository/MultiRepository.js";
 
 /**
  * Factory function to create a StaticQL instance.
@@ -11,22 +12,38 @@ import { StorageRepository } from "./repository/StorageRepository.js";
 export function defineStaticQL(config: StaticQLConfig) {
   return ({
     repository,
+    defaultRepository,
+    sourceRepositories,
+    writeRepository,
     options = {},
   }: {
-    repository: StorageRepository;
+    repository?: StorageRepository;
+    defaultRepository?: StorageRepository;
+    sourceRepositories?: Record<string, StorageRepository>;
+    writeRepository?: StorageRepository;
     options?: StaticQLInitOptions;
   }) => {
     const sourceConfigResolver = new SourceConfigResolver(config.sources);
 
-    // Set to a repository that needs RSC
-    if (
-      "setResolver" in repository &&
-      typeof repository.setResolver === "function"
-    ) {
-      repository.setResolver(sourceConfigResolver);
+    let repo: StorageRepository;
+    if (defaultRepository || sourceRepositories || writeRepository) {
+      repo = new MultiRepository(
+        defaultRepository ?? repository,
+        sourceRepositories,
+        writeRepository ?? defaultRepository ?? repository
+      );
+    } else {
+      if (!repository) {
+        throw new Error("StaticQL requires a repository instance");
+      }
+      repo = repository;
     }
 
-    return new StaticQL(config, repository, sourceConfigResolver, options);
+    if ("setResolver" in repo && typeof repo.setResolver === "function") {
+      repo.setResolver(sourceConfigResolver);
+    }
+
+    return new StaticQL(config, repo, sourceConfigResolver, options);
   };
 }
 

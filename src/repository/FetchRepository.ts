@@ -67,7 +67,13 @@ export class FetchRepository implements StorageRepository {
     const indexDir = `index/${rsc.name}.slug`;
     const prefixIndexLines = await this.readAllIndexesRemote(indexDir);
     const slugs = prefixIndexLines.map((line) => line.v).filter(Boolean);
-    const paths = slugs.map((slug) => rsc.pattern.replace("*", slug));
+
+    let paths: string[];
+    if (pattern.includes("*")) {
+      paths = Resolver.getSourcePathsBySlugs(pattern, slugs);
+    } else {
+      paths = slugs.map((slug) => rsc.pattern.replace("*", slug));
+    }
 
     return paths;
   }
@@ -165,7 +171,7 @@ export class FetchRepository implements StorageRepository {
     const flattened = [];
 
     for (const item of unflattened) {
-      for (const [key, value] of Object.entries(item.r)) {
+      for (const [key, value] of Object.entries(item.ref)) {
         if (!seen.has(key)) {
           seen.add(key);
           flattened.push({
