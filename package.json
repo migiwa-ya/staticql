@@ -1,6 +1,6 @@
 {
   "name": "staticql",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "type": "module",
   "main": "dist/src/index.js",
   "types": "./dist/src/index.d.ts",
@@ -28,6 +28,21 @@
       "import": "./dist/src/diff/extractDiff.js",
       "default": "./dist/src/diff/extractDiff.js",
       "types": "./dist/src/diff/extractDiff.d.ts"
+    },
+    "./diff/cli": {
+      "import": "./dist/src/diff/providers/cli.js",
+      "default": "./dist/src/diff/providers/cli.js",
+      "types": "./dist/src/diff/providers/cli.d.ts"
+    },
+    "./diff/github": {
+      "import": "./dist/src/diff/providers/github.js",
+      "default": "./dist/src/diff/providers/github.js",
+      "types": "./dist/src/diff/providers/github.d.ts"
+    },
+    "./diff/fs": {
+      "import": "./dist/src/diff/providers/fs.js",
+      "default": "./dist/src/diff/providers/fs.js",
+      "types": "./dist/src/diff/providers/fs.d.ts"
     },
     "./types": {
       "types": "./dist/src/types.d.ts"

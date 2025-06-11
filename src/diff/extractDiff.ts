@@ -1,7 +1,7 @@
-import { execSync } from "child_process";
 import path from "path";
 import { parseByType } from "../parser/index.js";
 import { DiffEntry, StaticQLConfig, Validator } from "../index.js";
+import { GitDiffProvider, DiffProvider } from "./providers/index.js";
 import {
   SourceConfigResolver as Resolver,
   ResolvedSourceConfig,
@@ -19,10 +19,12 @@ export interface ExtractDiffOpts {
   config: StaticQLConfig;
   customIndexers?: Record<string, (rec: any) => unknown>;
   validator?: Validator;
+  diffProvider?: DiffProvider;
 }
 
 export async function extractDiff(opts: ExtractDiffOpts): Promise<DiffEntry[]> {
-  const { config, customIndexers = {} } = opts;
+  const { config, customIndexers = {}, diffProvider } = opts;
+  const provider = diffProvider ?? new GitDiffProvider(opts.baseDir);
   const baseRef = opts.baseRef ?? "origin/main";
   const headRef = opts.headRef ?? "HEAD";
 
@@ -55,18 +57,8 @@ export async function extractDiff(opts: ExtractDiffOpts): Promise<DiffEntry[]> {
     return [];
   };
 
-  const gitShow = (rev: string, p: string) =>
-    execSync(`git show ${rev}:${p}`, { encoding: "utf8" });
-
   /* -------- git diff -------- */
-  const diffLines = execSync(
-    `git fetch origin main &&
-     git diff --name-status --diff-filter=ADM --no-renames ${baseRef}..${headRef}`,
-    { encoding: "utf8" }
-  )
-    .trim()
-    .split(/\r?\n/)
-    .filter(Boolean);
+  const diffLines = await provider.diffLines(baseRef, headRef);
 
   /* -------- main loop ------- */
   for (const line of diffLines) {
@@ -85,8 +77,8 @@ export async function extractDiff(opts: ExtractDiffOpts): Promise<DiffEntry[]> {
     const headText: string = ["A", "M"].includes(stat)
       ? await loader.load(filePathBase, rsc)
       : null;
-    const baseText = ["D", "M"].includes(stat)
-      ? gitShow(baseRef, filePath)
+    const baseText: string | null = ["D", "M"].includes(stat)
+      ? await provider.gitShow(baseRef, filePath)
       : null;
 
     const headRecs = headText ? asArray(headText) : [];
