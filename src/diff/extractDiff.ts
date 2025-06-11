@@ -8,9 +8,6 @@ import {
 } from "../SourceConfigResolver.js";
 import { resolveField } from "../utils/field.js";
 import { asArray } from "../utils/normalize.js";
-import { SourceLoader } from "../SourceLoader.js";
-import { FsRepository } from "../repository/FsRepository.js";
-import { defaultValidator } from "../validator/defaultValidator.js";
 
 export interface ExtractDiffOpts {
   baseRef: string;
@@ -31,12 +28,6 @@ export async function extractDiff(opts: ExtractDiffOpts): Promise<DiffEntry[]> {
   const resolver = new Resolver(config.sources);
   const resolved = resolver.resolveAll();
   const results: DiffEntry[] = [];
-  const repository = new FsRepository(opts.baseDir);
-  const loader = new SourceLoader(
-    repository,
-    resolver,
-    opts.validator ?? defaultValidator
-  );
 
   /* -------- helpers -------- */
   const parse = async (text: string, ext: string): Promise<any[]> => {
@@ -74,16 +65,21 @@ export async function extractDiff(opts: ExtractDiffOpts): Promise<DiffEntry[]> {
     if (!rsc) continue;
 
     const ext = path.extname(filePath).toLowerCase();
-    const headText: string = ["A", "M"].includes(stat)
-      ? await loader.load(filePathBase, rsc)
+    const headText: string | null = ["A", "M"].includes(stat)
+      ? await provider.gitShow(headRef, filePath)
       : null;
     const baseText: string | null = ["D", "M"].includes(stat)
       ? await provider.gitShow(baseRef, filePath)
       : null;
 
-    const headRecs = headText ? asArray(headText) : [];
+    const headRecs = headText ? await parse(headText, ext) : [];
     const baseRecs = baseText ? await parse(baseText, ext) : [];
 
+    headRecs.forEach((rec) => {
+      if (!rec.slug) {
+        rec.slug = Resolver.getSlugFromPath(rsc.pattern, filePathBase);
+      }
+    });
     baseRecs.forEach((rec) => {
       if (!rec.slug) {
         rec.slug = Resolver.getSlugFromPath(rsc.pattern, filePathBase);
