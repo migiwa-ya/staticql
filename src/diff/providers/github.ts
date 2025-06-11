@@ -1,4 +1,4 @@
-import type { DiffProvider } from "./index.js";
+import type { DiffProvider, DiffLine } from "./index.js";
 
 export interface GitHubDiffProviderOptions {
   owner: string;
@@ -27,7 +27,7 @@ export class GitHubDiffProvider implements DiffProvider {
     return headers;
   }
 
-  async diffLines(baseRef: string, headRef: string): Promise<string[]> {
+  async diffLines(baseRef: string, headRef: string): Promise<DiffLine[]> {
     const url = `https://api.github.com/repos/${this.owner}/${this.repo}/compare/${baseRef}...${headRef}`;
     const res = await fetch(url, { headers: this.headers });
     const data = await res.json();
@@ -39,14 +39,17 @@ export class GitHubDiffProvider implements DiffProvider {
     if (!Array.isArray(data.files)) {
       return [];
     }
-    const statusMap: Record<string, string> = {
+    const statusMap: Record<string, DiffLine['status']> = {
       added: "A",
       removed: "D",
       modified: "M",
     };
     return data.files
       .filter((file: any) => ["added", "removed", "modified"].includes(file.status))
-      .map((file: any) => `${statusMap[file.status]}	${file.filename}`);
+      .map((file: any) => ({
+        status: statusMap[file.status],
+        path: file.filename,
+      }));
   }
 
   async gitShow(rev: string, filePath: string): Promise<string> {

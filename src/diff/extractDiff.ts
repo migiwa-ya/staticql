@@ -52,8 +52,7 @@ export async function extractDiff(opts: ExtractDiffOpts): Promise<DiffEntry[]> {
   const diffLines = await provider.diffLines(baseRef, headRef);
 
   /* -------- main loop ------- */
-  for (const line of diffLines) {
-    const [stat, filePath] = line.split(/\t/);
+  for (const { status: stat, path: filePath } of diffLines) {
     const filePathBase = Resolver.extractBaseDir(
       filePath.replace(/\/$/, "").replace(`${opts.baseDir}`, "")
     ).replace(/^\//, "");
