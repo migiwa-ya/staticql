@@ -888,32 +888,6 @@ export class Indexer {
         }
       }
 
-      // resolve customIndexes
-      if (rsc.indexes && this.customIndexers) {
-        for (const [customName, _] of Object.entries(rsc.indexes)) {
-          if (
-            !Object.prototype.hasOwnProperty.call(
-              this.customIndexers,
-              `${rsc.name}.${customName}`
-            )
-          )
-            continue;
-          const callback = this.customIndexers[`${rsc.name}.${customName}`];
-          if (typeof callback === "function") {
-            try {
-              const customValue = callback(row);
-              if (customValue !== undefined && customValue !== null) {
-                result[customName] = customValue;
-              }
-            } catch (e) {
-              this.logger?.warn?.(
-                `[Indexer] Custom indexer for "${customName}" threw error: ${e}`
-              );
-            }
-          }
-        }
-      }
-
       return result;
     });
 
@@ -1165,12 +1139,15 @@ export class Indexer {
     if (rsc.indexes && this.customIndexers) {
       for (const [customName, _] of Object.entries(rsc.indexes)) {
         if (
-          !Object.prototype.hasOwnProperty.call(this.customIndexers, customName)
+          !Object.prototype.hasOwnProperty.call(
+            this.customIndexers,
+            `${rsc.name}.${customName}`
+          )
         )
           continue;
 
         try {
-          const callback = this.customIndexers[customName];
+          const callback = this.customIndexers[`${rsc.name}.${customName}`];
           const customValue = callback(record);
 
           if (customValue !== undefined && customValue !== null) {
