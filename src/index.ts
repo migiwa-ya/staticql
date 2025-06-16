@@ -1,4 +1,5 @@
 import { SourceConfigResolver } from "./SourceConfigResolver.js";
+import { registerParser } from "./parser/index.js";
 import { StaticQL, StaticQLConfig, StaticQLInitOptions } from "./StaticQL.js";
 import { StorageRepository } from "./repository/StorageRepository.js";
 import { MultiRepository } from "./repository/MultiRepository.js";
@@ -23,6 +24,12 @@ export function defineStaticQL(config: StaticQLConfig) {
     writeRepository?: StorageRepository;
     options?: StaticQLInitOptions;
   }) => {
+    // inject custom parsers if provided via options
+    if (options.parsers) {
+      for (const [type, parser] of Object.entries(options.parsers)) {
+        registerParser(type, parser);
+      }
+    }
     const sourceConfigResolver = new SourceConfigResolver(config.sources);
 
     let repo: StorageRepository;

@@ -15,7 +15,7 @@ export type SourceRecord = {
 /**
  * Supported content types.
  */
-export type SourceType = "markdown" | "yaml" | "json";
+export type SourceType = string;
 
 /**
  * Configuration for a single source (as defined in user config).

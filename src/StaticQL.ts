@@ -11,13 +11,24 @@ import { Validator } from "./validator/Validator.js";
 import { defaultValidator } from "./validator/defaultValidator.js";
 import { ConsoleLogger } from "./logger/ConsoleLogger.js";
 import { LoggerProvider } from "./logger/LoggerProvider.js";
+import { ParserOptions } from "./parser/index.js";
 
 /**
  * Initialization options for StaticQL.
  */
+/**
+ * Initialization options for StaticQL.
+ */
 export interface StaticQLInitOptions {
+  /** Validator for content schema */
   validator?: Validator;
+  /** Logger for debug/info/warning output */
   logger?: LoggerProvider;
+  /**
+   * Parsers registry to override or extend default parsers
+   * (e.g. CSV, XML, custom formats).
+   */
+  parsers?: Record<string, (options: ParserOptions) => any>;
 }
 
 /**
