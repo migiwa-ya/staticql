@@ -47,8 +47,12 @@
           "type": "hasManyThrough"
         }
       },
-      "index": ["name", "compoundSlugs", "tagSlugs", "recipes.recipeGroupSlug"],
-      "splitIndexByKey": true
+      "index": {
+        "name": {},
+        "compoundSlugs": {},
+        "tagSlugs": {},
+        "recipes.recipeGroupSlug": {}
+      }
     },
 
     "tags": {
@@ -115,7 +119,7 @@
           "type": "hasOneThrough"
         }
       },
-      "index": ["herbs.slug"]
+      "index": { "herbs.slug": {} }
     },
 
     "recipeGroups": {

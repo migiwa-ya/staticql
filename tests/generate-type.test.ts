@@ -23,10 +23,18 @@ describe("generate-types", () => {
     const content = fs.readFileSync(outputPath + typeFilename, "utf-8");
 
     expect(content).toMatch(/export type HerbsRecord = /);
-    expect(content).toMatch(/name: string;/);
-    expect(content).toMatch(/tagSlugs: string\[]/);
-    expect(content).toMatch(/herbs\?: HerbsRecord\[]/);
+    expect(content).toMatch(/compounds\?: CompoundsRecord\[]/);
+    expect(content).toMatch(/tags\?: TagsRecord\[]/);
     expect(content).toMatch(/recipes\?: RecipesRecord\[];/);
+  });
+
+  it("generates HerbsRecord with index fields", () => {
+    const content = fs.readFileSync(outputPath + typeFilename, "utf-8");
+
+    expect(content).toMatch(/export type HerbsRecord = /);
+    expect(content).toMatch(/name: Index<string>;/);
+    expect(content).toMatch(/compoundSlugs\?: Index<string\[]>;/);
+    expect(content).toMatch(/tagSlugs: Index<string\[]>;/);
   });
 
   it("generates HerbsRelation_recipes as Record<string, string[]>", () => {

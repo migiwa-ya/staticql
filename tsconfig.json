@@ -9,8 +9,9 @@
     "skipLibCheck": true,
     "declaration": true,
     "rootDir": ".",
-    "outDir": "dist"
+    "outDir": "dist",
+    "resolveJsonModule": true
   },
-  "include": ["src", "cli"],
-  "exclude": ["tests", "dist", "node_modules"]
+  "include": ["src", "cli", "tests"],
+  "exclude": ["dist", "node_modules"]
 }

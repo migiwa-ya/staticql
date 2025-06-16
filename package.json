@@ -11,38 +11,38 @@
     },
     "./repo/fs": {
       "node": "./dist/src/repository/FsRepository.js",
-      "default": "./dist/src/repository/FsRepository.js",
-      "types": "./dist/src/repository/FsRepository.d.ts"
+      "types": "./dist/src/repository/FsRepository.d.ts",
+      "default": "./dist/src/repository/FsRepository.js"
     },
     "./repo/workers-r2": {
       "workerd": "./dist/src/repository/R2Repository.js",
-      "default": "./dist/src/repository/R2Repository.js",
-      "types": "./dist/src/repository/R2Repository.d.ts"
+      "types": "./dist/src/repository/R2Repository.d.ts",
+      "default": "./dist/src/repository/R2Repository.js"
     },
     "./repo/fetch": {
       "import": "./dist/src/repository/FetchRepository.js",
-      "default": "./dist/src/repository/FetchRepository.js",
-      "types": "./dist/src/repository/FetchRepository.d.ts"
+      "types": "./dist/src/repository/FetchRepository.d.ts",
+      "default": "./dist/src/repository/FetchRepository.js"
     },
     "./diff": {
       "import": "./dist/src/diff/extractDiff.js",
-      "default": "./dist/src/diff/extractDiff.js",
-      "types": "./dist/src/diff/extractDiff.d.ts"
+      "types": "./dist/src/diff/extractDiff.d.ts",
+      "default": "./dist/src/diff/extractDiff.js"
     },
     "./diff/cli": {
       "import": "./dist/src/diff/providers/cli.js",
-      "default": "./dist/src/diff/providers/cli.js",
-      "types": "./dist/src/diff/providers/cli.d.ts"
+      "types": "./dist/src/diff/providers/cli.d.ts",
+      "default": "./dist/src/diff/providers/cli.js"
     },
     "./diff/github": {
       "import": "./dist/src/diff/providers/github.js",
-      "default": "./dist/src/diff/providers/github.js",
-      "types": "./dist/src/diff/providers/github.d.ts"
+      "types": "./dist/src/diff/providers/github.d.ts",
+      "default": "./dist/src/diff/providers/github.js"
     },
     "./diff/fs": {
       "import": "./dist/src/diff/providers/fs.js",
-      "default": "./dist/src/diff/providers/fs.js",
-      "types": "./dist/src/diff/providers/fs.d.ts"
+      "types": "./dist/src/diff/providers/fs.d.ts",
+      "default": "./dist/src/diff/providers/fs.js"
     },
     "./types": {
       "types": "./dist/src/types.d.ts"
@@ -58,7 +58,7 @@
   ],
   "scripts": {
     "build": "tsc",
-    "test": "vitest"
+    "test": "vitest run"
   },
   "keywords": [
     "staticql",
