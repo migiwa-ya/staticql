@@ -120,13 +120,6 @@ npx staticql-gen-index path/to/staticql.config.json output/dir \
   --diff-file=changes.json
 ```
 
-## Development & Testing
-
-````bash
-npm ci
-npm run build
-npm test
-
 ## Parser Injection
 
 You can inject custom parsers when initializing StaticQL to handle arbitrary file formats, for example CSV:
@@ -139,10 +132,14 @@ import config from "./staticql.config.json";
 
 // Custom CSV parser example
 const csvParser: Parser = ({ rawContent }) => {
-  const text = rawContent instanceof Uint8Array
-    ? new TextDecoder().decode(rawContent)
-    : rawContent;
-  const lines = text.trim().split(/\r?\n/).map((line) => line.split(","));
+  const text =
+    rawContent instanceof Uint8Array
+      ? new TextDecoder().decode(rawContent)
+      : rawContent;
+  const lines = text
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => line.split(","));
   const headers = lines[0];
 
   return lines.slice(1).map((cols) => {
@@ -160,11 +157,8 @@ const staticql = defineStaticQL(config)({
 });
 
 await staticql.saveIndexes();
-````
-
 ```
 
 ## License
 
 MIT
-```
