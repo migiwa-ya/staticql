@@ -1,4 +1,4 @@
-import { SourceConfigResolver as Resolver } from "../SourceConfigResolver";
+import { SourceConfigResolver as Resolver } from "../SourceConfigResolver.js";
 
 /**
  * StorageRepository: Abstract interface for reading and writing data sources.

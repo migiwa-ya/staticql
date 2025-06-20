@@ -2,7 +2,7 @@
 
 import path from "path";
 import { promises as fs } from "fs";
-import { Relation } from "../src/SourceConfigResolver";
+import { Relation } from "../src/SourceConfigResolver.js";
 import { ConsoleLogger } from "../src/logger/ConsoleLogger.js";
 import { StaticQLConfig } from "../src";
 

@@ -11,7 +11,7 @@ import {
   SourceConfigResolver as Resolver,
   SourceRecord,
   ThroughRelation,
-} from "./SourceConfigResolver";
+} from "./SourceConfigResolver.js";
 import { LoggerProvider } from "./logger/LoggerProvider";
 import {
   createPageInfo,

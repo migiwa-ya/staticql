@@ -1,4 +1,4 @@
-import { SourceRecord } from "../SourceConfigResolver";
+import { SourceRecord } from "../SourceConfigResolver.js";
 
 // Extract joinable fields (those referencing SourceRecord or SourceRecord[])
 export type JoinableKeys<T> = {
