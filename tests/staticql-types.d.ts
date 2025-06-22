@@ -16,7 +16,7 @@ export type TagsRecord = SourceRecord & { slug: string; name: string };
 
 export type CompoundsRecord = SourceRecord & { slug: string; name: string };
 
-export type RecipesRecord = SourceRecord & { herbs?: HerbsRecord[]; process?: ProcessesRecord; recipeGroupSlug: string; summary?: string; processSlug?: string; recipe: string[] };
+export type RecipesRecord = SourceRecord & { herbs?: HerbsRecord[]; process?: ProcessesRecord; recipeGroupSlug: Index<string>; summary?: string; processSlug?: string; recipe: string[] };
 
 export type RecipesRelation_herbs = Record<string, string[]>;
 

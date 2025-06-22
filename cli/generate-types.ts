@@ -84,6 +84,28 @@ function generateTypeDefs(config: StaticQLConfig): string {
     const indexFieldNames: Set<string> = new Set();
     const customIndexFieldNames: Set<string> = new Set();
 
+    if (sourceDef.relations) {
+      for (const rel of Object.values(sourceDef.relations)) {
+        if (
+          rel.type === "hasOne" ||
+          rel.type === "hasMany" ||
+          rel.type === "belongsTo" ||
+          rel.type === "belongsToMany"
+        ) {
+          if (rel.localKey !== "slug") {
+            indexFieldNames.add(rel.localKey);
+          }
+        } else if (
+          rel.type === "hasOneThrough" ||
+          rel.type === "hasManyThrough"
+        ) {
+          if (rel.sourceLocalKey !== "slug") {
+            indexFieldNames.add(rel.sourceLocalKey);
+          }
+        }
+      }
+    }
+
     if (sourceDef.index) {
       for (const [fieldName] of Object.entries(sourceDef.index)) {
         indexFieldNames.add(fieldName);
@@ -93,6 +115,35 @@ function generateTypeDefs(config: StaticQLConfig): string {
     if (sourceDef.customIndex) {
       for (const [fieldName] of Object.entries(sourceDef.customIndex)) {
         customIndexFieldNames.add(fieldName);
+      }
+    }
+
+    for (const [otherSourceName, otherSourceDef] of Object.entries(sources)) {
+      if (otherSourceName === sourceName || !otherSourceDef.relations) continue;
+
+      for (const relDef of Object.values(otherSourceDef.relations)) {
+        if (relDef.to !== sourceName) continue;
+
+        let field: string | null = null;
+        if (
+          relDef.type === "hasOne" ||
+          relDef.type === "hasMany" ||
+          relDef.type === "belongsTo" ||
+          relDef.type === "belongsToMany"
+        ) {
+          field = relDef.foreignKey === "slug" ? null : relDef.foreignKey;
+        } else if (
+          relDef.type === "hasOneThrough" ||
+          relDef.type === "hasManyThrough"
+        ) {
+          field =
+            relDef.targetForeignKey === "slug"
+              ? null
+              : `${relDef.targetForeignKey}.slug`;
+        }
+        if (field) {
+          indexFieldNames.add(field);
+        }
       }
     }
 
@@ -119,32 +170,6 @@ function generateTypeDefs(config: StaticQLConfig): string {
 
     typeDefs += `export type ${typeName} = SourceRecord & ${finalTypeString};\n\n`;
 
-    for (const [otherSourceName, otherSourceDef] of Object.entries(sources)) {
-      if (otherSourceName === sourceName) continue;
-      if (!otherSourceDef.relations) continue;
-
-      for (const [relKey, relDef] of Object.entries(otherSourceDef.relations)) {
-        if (relDef.to !== sourceName) continue;
-
-        let field: string | null = null;
-        if (
-          relDef.type === "hasOne" ||
-          relDef.type === "hasMany" ||
-          relDef.type === "belongsTo" ||
-          relDef.type === "belongsToMany"
-        ) {
-          field = relDef.foreignKey === "slug" ? null : relDef.foreignKey;
-        } else if (
-          relDef.type === "hasOneThrough" ||
-          relDef.type === "hasManyThrough"
-        ) {
-          field =
-            relDef.targetForeignKey === "slug"
-              ? null
-              : `${relDef.targetForeignKey}.slug`;
-        }
-      }
-    }
 
     if (sourceDef.relations) {
       for (const [key, relDef] of Object.entries(sourceDef.relations)) {
