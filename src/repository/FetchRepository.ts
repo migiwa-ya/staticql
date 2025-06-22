@@ -1,7 +1,7 @@
 import { SourceConfigResolver as Resolver } from "../SourceConfigResolver.js";
 import { parsePrefixDict } from "../utils/normalize.js";
 import { joinPath, toI, toP } from "../utils/path.js";
-import type { StorageRepository } from "./StorageRepository";
+import type { StorageRepository } from "./StorageRepository.js";
 
 /**
  * FetchRepository: A browser-compatible StorageRepository implementation.

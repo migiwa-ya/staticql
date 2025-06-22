@@ -1,7 +1,7 @@
 import { promises as fs } from "fs";
 import { createReadStream } from "node:fs";
 import * as path from "path";
-import { StorageRepository } from "./StorageRepository";
+import { StorageRepository } from "./StorageRepository.js";
 import { Readable } from "node:stream";
 import { joinPath } from "../utils/path.js";
 
