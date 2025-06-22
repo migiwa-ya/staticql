@@ -517,7 +517,18 @@ export class QueryBuilder<T extends SourceRecord, TIndexKey extends string> {
       const { field, op, value } = filter;
       let matchedIndexes: PrefixIndexLine[] = [];
 
-      if (andMode && matched && i > 0) {
+      // direct slug lookup: eq or in on slug can bypass index files
+      if (
+        field === "slug" &&
+        (op === "eq" || (op === "in" && Array.isArray(value)))
+      ) {
+        const slugs = asArray(value).map((v) => String(v));
+        matchedIndexes = slugs.map((slug) => ({
+          v: slug,
+          vs: slug,
+          ref: { [slug]: { slug: [slug] } },
+        }));
+      } else if (andMode && matched && i > 0) {
         // for the second (narrow down from matched)
 
         const indexConfig = rsc.indexes?.[field];
