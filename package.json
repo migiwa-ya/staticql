@@ -54,6 +54,16 @@
       "types": "./dist/src/cache/IndexedDBCacheProvider.d.ts",
       "default": "./dist/src/cache/IndexedDBCacheProvider.js"
     },
+    "./ssg": {
+      "import": "./dist/src/ssg.js",
+      "types": "./dist/src/ssg.d.ts",
+      "default": "./dist/src/ssg.js"
+    },
+    "./prefetch": {
+      "import": "./dist/src/prefetch.js",
+      "types": "./dist/src/prefetch.d.ts",
+      "default": "./dist/src/prefetch.js"
+    },
     "./types": {
       "types": "./dist/src/types.d.ts"
     }

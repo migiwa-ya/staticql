@@ -17,7 +17,7 @@ const logger = new ConsoleLogger("info");
  * Main CLI entry point.
  */
 async function run() {
-  const { config, outputDir, isIncremental, diffFilePath, gzip } =
+  const { config, outputDir, isIncremental, diffFilePath, gzip, manifest } =
     await getArgs();
   const staticql: StaticQL = init(config, outputDir, isIncremental);
 
@@ -27,9 +27,14 @@ async function run() {
     await runFull(staticql);
   }
 
+  const indexDir = path.resolve(outputDir, Indexer.indexPrefix);
+
   if (gzip) {
-    const indexDir = path.resolve(outputDir, Indexer.indexPrefix);
     await generateGzipFiles(indexDir);
+  }
+
+  if (manifest) {
+    await generateManifest(indexDir, outputDir);
   }
 }
 
@@ -65,7 +70,9 @@ function getArgs() {
   const raw = readFileSync(configPath, "utf-8");
   const config = JSON.parse(raw);
 
-  return { config, outputDir, isIncremental, diffFilePath, gzip: !noGzip };
+  const manifest = args.includes("--manifest");
+
+  return { config, outputDir, isIncremental, diffFilePath, gzip: !noGzip, manifest };
 }
 
 /**
@@ -186,4 +193,22 @@ async function generateGzipFiles(indexDir: string) {
   );
 
   logger.info(`Generated ${targets.length} gzip files.`);
+}
+
+/**
+ * Generates a manifest JSON file listing all index file paths (relative to outputDir).
+ * This can be used for prefetching or cache warming.
+ */
+async function generateManifest(indexDir: string, outputDir: string) {
+  if (!existsSync(indexDir)) return;
+
+  logger.info("Generating manifest...");
+  const files = await walkDir(indexDir);
+  const relativePaths = files
+    .filter((f) => f.endsWith(".jsonl") && !f.endsWith(".gz"))
+    .map((f) => path.relative(path.resolve(outputDir), f));
+
+  const manifestPath = path.resolve(outputDir, "staticql-manifest.json");
+  await fsPromises.writeFile(manifestPath, JSON.stringify(relativePaths, null, 2));
+  logger.info(`Manifest written: ${manifestPath} (${relativePaths.length} files)`);
 }
