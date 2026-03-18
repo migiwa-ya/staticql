@@ -198,6 +198,10 @@ const staticql = defineStaticQL(config)({
 await staticql.saveIndexes();
 ```
 
+## Documentation
+
+For detailed guides on configuration, performance tuning, and the full API, see the [Wiki](https://github.com/migiwa-ya/staticql/wiki).
+
 ## License
 
 MIT
