@@ -1,16 +1,16 @@
-import { Indexer } from "./Indexer.js";
 import { joinPath } from "./utils/path.js";
 import { PrefixIndexDefinition, PrefixIndexDepth } from "./utils/typs.js";
 import { JSONSchema7 } from "./validator/Validator.js";
+import { IndexConfigFactory } from "./IndexConfigFactory.js";
 
-/**
- * Represents a single content record, identified by a slug.
- */
-export type SourceRecord = {
-  slug: string;
-  raw: string;
-  [key: string]: any;
-};
+// Re-export types from types.ts for backward compatibility
+export type {
+  SourceRecord,
+  DirectRelation,
+  ThroughRelation,
+  Relation,
+} from "./types.js";
+import type { Relation } from "./types.js";
 
 /**
  * Supported content types.
@@ -25,11 +25,9 @@ export interface SourceConfig {
   pattern: string;
   schema: JSONSchema7;
   relations?: Record<string, Relation>;
-  index?: IndexDefinition;
-  customIndex?: IndexDefinition;
+  index?: Record<string, { indexDepth?: PrefixIndexDepth }>;
+  customIndex?: Record<string, { indexDepth?: PrefixIndexDepth }>;
 }
-
-type IndexDefinition = Record<string, { indexDepth?: PrefixIndexDepth }>;
 
 /**
  * Internally resolved and enriched source configuration.
@@ -44,45 +42,16 @@ export interface ResolvedSourceConfig {
 }
 
 /**
- * Direct relation to another source.
- */
-export type DirectRelation = {
-  to: string;
-  localKey: string;
-  foreignKey: string;
-  type: "hasOne" | "hasMany" | "belongsTo" | "belongsToMany";
-};
-
-/**
- * Through (intermediate) relation to another source.
- */
-export type ThroughRelation = {
-  to: string;
-  through: string;
-  sourceLocalKey: string;
-  throughForeignKey: string;
-  throughLocalKey: string;
-  targetForeignKey: string;
-  type: "hasOneThrough" | "hasManyThrough";
-};
-
-/**
- * Any supported relation type.
- */
-export type Relation = DirectRelation | ThroughRelation;
-
-/**
  * Resolves user-defined source configurations into a normalized internal format.
  */
 export class SourceConfigResolver {
   private cache: Record<string, ResolvedSourceConfig> = {};
+  private indexConfigFactory = new IndexConfigFactory();
 
   constructor(private readonly sources: Record<string, SourceConfig>) {}
 
   /**
    * Resolves all sources and returns the enriched configurations.
-   *
-   * @returns
    */
   resolveAll(): ResolvedSourceConfig[] {
     if (Object.values(this.cache).length !== 0) {
@@ -111,99 +80,11 @@ export class SourceConfigResolver {
     const source = this.sources[sourceName];
     if (!source) throw new Error(`Source not found: ${sourceName}`);
 
-    const indexes: ResolvedSourceConfig["indexes"] = {
-      slug: {
-        dir: Indexer.getIndexDir(sourceName, "slug"),
-        depth: Indexer.indexDepth,
-      },
-    };
-
-    if (source.index) {
-      for (const [fieldName, definition] of Object.entries(source.index)) {
-        const depth = definition["indexDepth"] ?? Indexer.indexDepth;
-
-        if (!this.isDepthInRange(depth)) throw new Error("");
-
-        indexes[fieldName] = {
-          dir: Indexer.getIndexDir(sourceName, fieldName),
-          depth,
-        };
-      }
-    }
-
-    const relationalSources = [
-      ...Object.entries(this.sources)
-        .filter(([name]) => name !== sourceName)
-        .map(([_, source]) =>
-          Object.entries(source.relations ?? {}).find(([_, rel]) =>
-            this.isThroughRelation(rel)
-              ? rel.to === sourceName || rel.through === sourceName
-              : rel.to === sourceName
-          )
-        )
-        .filter(Boolean)
-        .filter((e): e is [string, Relation] => !!e),
-      ...Object.entries(source.relations ?? {}),
-    ];
-
-    if (relationalSources) {
-      for (const [_, rel] of relationalSources) {
-        const fieldNames: Array<string | null> = [];
-
-        if (
-          rel.type === "belongsTo" ||
-          rel.type === "belongsToMany" ||
-          rel.type === "hasOne" ||
-          rel.type === "hasMany"
-        ) {
-          if (rel.to === sourceName) {
-            fieldNames.push(rel.foreignKey === "slug" ? null : rel.foreignKey);
-          } else {
-            fieldNames.push(rel.localKey === "slug" ? null : rel.localKey);
-          }
-        } else if (
-          rel.type === "hasOneThrough" ||
-          rel.type === "hasManyThrough"
-        ) {
-          if (rel.to === sourceName) {
-            fieldNames.push(
-              rel.throughForeignKey === "slug" ? null : rel.throughForeignKey
-            );
-          } else {
-            fieldNames.push(
-              rel.targetForeignKey === "slug" ? null : rel.targetForeignKey
-            );
-          }
-        }
-
-        if (!fieldNames.length) continue;
-
-        for (const fieldName of fieldNames) {
-          if (!fieldName) continue;
-
-          indexes[fieldName] = {
-            dir: Indexer.getIndexDir(sourceName, fieldName),
-            depth: Indexer.indexDepth,
-          };
-        }
-      }
-    }
-
-    // resolve customIndexes
-    if (source.customIndex) {
-      for (const [fieldName, definition] of Object.entries(
-        source.customIndex
-      )) {
-        const depth = definition["indexDepth"] ?? Indexer.indexDepth;
-
-        if (!this.isDepthInRange(depth)) throw new Error("");
-
-        indexes[fieldName] = {
-          dir: Indexer.getIndexDir(sourceName, fieldName),
-          depth,
-        };
-      }
-    }
+    const indexes = this.indexConfigFactory.buildForSource(
+      sourceName,
+      source,
+      this.sources
+    );
 
     const result: ResolvedSourceConfig = {
       name: sourceName,
@@ -221,23 +102,13 @@ export class SourceConfigResolver {
 
   /**
    * Determines whether a relation is a through (indirect) relation.
-   *
-   * @param rel
-   * @returns
    */
-  isThroughRelation(rel: Relation): rel is ThroughRelation {
+  isThroughRelation(rel: Relation): rel is import("./types.js").ThroughRelation {
     return (
       typeof rel === "object" &&
       "through" in rel &&
       (rel.type === "hasOneThrough" || rel.type === "hasManyThrough")
     );
-  }
-
-  /**
-   * Check depth in range.
-   */
-  private isDepthInRange(n: number): n is PrefixIndexDepth {
-    return n >= 1 && n <= 10;
   }
 
   /**

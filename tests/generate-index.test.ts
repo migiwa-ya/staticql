@@ -28,7 +28,7 @@ function readIndexRecords(dir: string): Record<string, unknown[]> {
       const rel = path.relative(dir, full);
       if (entry.isDirectory()) {
         walk(full);
-      } else if (entry.name !== "_prefixes.jsonl") {
+      } else if (entry.name !== "_prefixes.jsonl" && !entry.name.endsWith(".gz")) {
         const lines = fs.readFileSync(full, "utf-8").split(/\r?\n/).filter(Boolean);
         const objs = lines.map((l) => JSON.parse(l));
         objs.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));

@@ -44,6 +44,16 @@
       "types": "./dist/src/diff/providers/fs.d.ts",
       "default": "./dist/src/diff/providers/fs.js"
     },
+    "./repo/cached": {
+      "import": "./dist/src/repository/CachedRepository.js",
+      "types": "./dist/src/repository/CachedRepository.d.ts",
+      "default": "./dist/src/repository/CachedRepository.js"
+    },
+    "./cache/indexeddb": {
+      "import": "./dist/src/cache/IndexedDBCacheProvider.js",
+      "types": "./dist/src/cache/IndexedDBCacheProvider.d.ts",
+      "default": "./dist/src/cache/IndexedDBCacheProvider.js"
+    },
     "./types": {
       "types": "./dist/src/types.d.ts"
     }

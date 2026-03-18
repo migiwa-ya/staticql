@@ -1,9 +1,10 @@
-import { DirectRelationMap, ThroughRelationMap } from "../Indexer.js";
 import {
   DirectRelation,
+  DirectRelationMap,
   SourceRecord,
   ThroughRelation,
-} from "../SourceConfigResolver.js";
+  ThroughRelationMap,
+} from "../types.js";
 import { resolveField } from "./field.js";
 
 /**

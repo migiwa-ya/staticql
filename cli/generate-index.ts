@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 
 import path from "path";
-import { existsSync, rmSync, readFileSync } from "fs";
+import { existsSync, rmSync, readFileSync, promises as fsPromises } from "fs";
+import { createReadStream, createWriteStream } from "fs";
+import { pipeline } from "stream/promises";
+import { createGzip } from "zlib";
 import { defineStaticQL } from "../src/index.js";
 import { FsRepository } from "../src/repository/FsRepository.js";
 import { StaticQL, StaticQLConfig } from "../src/StaticQL.js";
@@ -14,13 +17,19 @@ const logger = new ConsoleLogger("info");
  * Main CLI entry point.
  */
 async function run() {
-  const { config, outputDir, isIncremental, diffFilePath } = await getArgs();
+  const { config, outputDir, isIncremental, diffFilePath, gzip } =
+    await getArgs();
   const staticql: StaticQL = init(config, outputDir, isIncremental);
 
   if (isIncremental && diffFilePath) {
     await runIncremental(staticql, diffFilePath);
   } else {
     await runFull(staticql);
+  }
+
+  if (gzip) {
+    const indexDir = path.resolve(outputDir, Indexer.indexPrefix);
+    await generateGzipFiles(indexDir);
   }
 }
 
@@ -33,6 +42,7 @@ function getArgs() {
   const args = process.argv.slice(2);
   let [configPath, outputDir] = args;
   const isIncremental = args.includes("--incremental");
+  const noGzip = args.includes("--no-gzip");
   const diffFilePathArg = args.find((a) => a.startsWith("--diff-file="));
   const diffFilePath = diffFilePathArg ? diffFilePathArg.split("=")[1] : null;
 
@@ -55,7 +65,7 @@ function getArgs() {
   const raw = readFileSync(configPath, "utf-8");
   const config = JSON.parse(raw);
 
-  return { config, outputDir, isIncremental, diffFilePath };
+  return { config, outputDir, isIncremental, diffFilePath, gzip: !noGzip };
 }
 
 /**
@@ -133,4 +143,47 @@ async function runIncremental(staticql: StaticQL, diffFilePath: string) {
     logger.warn(err);
     process.exit(1);
   }
+}
+
+/**
+ * Recursively walks a directory and returns all file paths.
+ */
+async function walkDir(dir: string): Promise<string[]> {
+  const files: string[] = [];
+  const entries = await fsPromises.readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await walkDir(full)));
+    } else {
+      files.push(full);
+    }
+  }
+  return files;
+}
+
+/**
+ * Generates .gz files for all index files in the given directory.
+ */
+async function generateGzipFiles(indexDir: string) {
+  if (!existsSync(indexDir)) return;
+
+  logger.info("Generating gzip files...");
+  const files = await walkDir(indexDir);
+  const targets = files.filter(
+    (f) => f.endsWith(".jsonl") && !f.endsWith(".gz")
+  );
+
+  await Promise.all(
+    targets.map(async (filePath) => {
+      const gzPath = filePath + ".gz";
+      await pipeline(
+        createReadStream(filePath),
+        createGzip(),
+        createWriteStream(gzPath)
+      );
+    })
+  );
+
+  logger.info(`Generated ${targets.length} gzip files.`);
 }
