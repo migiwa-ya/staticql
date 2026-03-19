@@ -535,7 +535,27 @@ export class IndexBuilder {
     for (const record of records) {
       const paths = new Map<string, Set<string>>();
       for (const field of indexFields) {
-        const fieldValues = resolveField(record, field);
+        let fieldValues = resolveField(record, field);
+
+        // For custom indexers, resolveField returns empty because the field
+        // doesn't exist on the record. Use the custom indexer callback instead.
+        if (fieldValues.length === 0 && this.customIndexers) {
+          for (const [key, callback] of Object.entries(this.customIndexers)) {
+            if (key.endsWith(`.${field}`)) {
+              try {
+                const customValue = callback(record);
+                if (customValue != null) {
+                  const arr = Array.isArray(customValue) ? customValue : [customValue];
+                  fieldValues = arr.map((v) => String(v));
+                }
+              } catch {
+                // skip
+              }
+              break;
+            }
+          }
+        }
+
         for (const fieldValue of fieldValues) {
           const prefix = getPrefixIndexPath(
             fieldValue,
