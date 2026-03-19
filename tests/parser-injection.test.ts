@@ -77,6 +77,63 @@ describe("Parser Injection", () => {
     const exists = await waitForDirExists(idxDir);
     expect(exists).toBe(true);
   });
+
+  it("should generate _prefixes.jsonl for custom index fields", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "staticql-custom-idx-"));
+    const contentDir = path.join(tmp, "content");
+    fs.mkdirSync(contentDir, { recursive: true });
+
+    // Create multiple CSV files so multiple prefix buckets are generated
+    fs.writeFileSync(path.join(contentDir, "alpha.csv"), "col1,col2\nalpha,100");
+    fs.writeFileSync(path.join(contentDir, "beta.csv"), "col1,col2\nbeta,200");
+    fs.writeFileSync(path.join(contentDir, "gamma.csv"), "col1,col2\ngamma,300");
+
+    const config = {
+      sources: {
+        items: {
+          type: "csv",
+          pattern: "content/*.csv",
+          schema: {
+            type: "object",
+            required: ["col1"],
+            properties: {
+              col1: { type: "string" },
+              col2: { type: "string" },
+            },
+          },
+          customIndex: {
+            uppercol1: {},
+          },
+        },
+      },
+    } as StaticQLConfig;
+
+    const staticql = defineStaticQL(config)({
+      repository: new FsRepository(tmp),
+      options: { parsers: { csv: csvParser } },
+    });
+
+    await staticql.saveIndexes({
+      "items.uppercol1": (record) => {
+        return record.col1 ? String(record.col1).toUpperCase() : undefined;
+      },
+    });
+
+    // _prefixes.jsonl must exist for the custom index
+    const prefixesPath = path.join(tmp, "index", "items.uppercol1", "_prefixes.jsonl");
+    expect(fs.existsSync(prefixesPath)).toBe(true);
+
+    // Verify it contains the expected prefix entries
+    const prefixContent = fs.readFileSync(prefixesPath, "utf-8").trim();
+    const prefixes = prefixContent.split("\n");
+    expect(prefixes.length).toBeGreaterThanOrEqual(1);
+
+    // _index.jsonl files should also exist under prefix directories
+    for (const prefix of prefixes) {
+      const indexPath = path.join(tmp, "index", "items.uppercol1", prefix, "_index.jsonl");
+      expect(fs.existsSync(indexPath)).toBe(true);
+    }
+  });
 });
 
 async function waitForDirExists(
