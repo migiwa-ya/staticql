@@ -13,9 +13,15 @@ import type { StorageRepository } from "./StorageRepository.js";
 export class FetchRepository implements StorageRepository {
   baseUrl: string;
   resolver?: Resolver;
+  private preferGzip: boolean;
 
-  constructor(baseUrl: string = "/") {
+  /**
+   * @param baseUrl - Base URL for fetching files.
+   * @param options.preferGzip - If true, tries fetching .gz version first and decompresses. Defaults to false.
+   */
+  constructor(baseUrl: string = "/", options?: { preferGzip?: boolean }) {
     this.baseUrl = baseUrl.replace(/\/+$/, "") + "/";
+    this.preferGzip = options?.preferGzip ?? false;
   }
 
   setResolver(resolver: Resolver) {
@@ -31,6 +37,20 @@ export class FetchRepository implements StorageRepository {
    */
   async readFile(path: string): Promise<string> {
     const url = this.baseUrl + path.replace(/^\/+/, "");
+
+    if (this.preferGzip) {
+      try {
+        const gzRes = await fetch(url + ".gz");
+        if (gzRes.ok) {
+          const ds = new DecompressionStream("gzip");
+          const decompressed = gzRes.body!.pipeThrough(ds);
+          return await new Response(decompressed).text();
+        }
+      } catch {
+        // Fall through to non-gzip fetch
+      }
+    }
+
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Failed to fetch: ${url}`);
     return await res.text();
@@ -122,6 +142,18 @@ export class FetchRepository implements StorageRepository {
    * @returns Promise that resolves to a ReadableStream for the file contents
    */
   async openFileStream(path: string): Promise<ReadableStream> {
+    if (this.preferGzip) {
+      try {
+        const gzRes = await fetch(`${this.baseUrl}${path}.gz`);
+        if (gzRes.ok) {
+          const ds = new DecompressionStream("gzip");
+          return gzRes.body!.pipeThrough(ds);
+        }
+      } catch {
+        // Fall through to non-gzip fetch
+      }
+    }
+
     const res = await fetch(`${this.baseUrl}${path}`);
     if (!res.ok) throw new Error(`Failed to fetch ${path}`);
     return res.body!;
