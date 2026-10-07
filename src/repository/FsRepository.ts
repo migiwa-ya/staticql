@@ -84,7 +84,7 @@ export class FsRepository implements StorageRepository {
     const result: string[] = [];
 
     if ((await fs.stat(abs)).isFile()) {
-      return [abs];
+      return [path.relative(this.baseDir, abs)];
     }
 
     for await (const file of this.walk(abs)) {

@@ -173,7 +173,9 @@ export class SourceConfigResolver {
    */
   static getSlugFromPath(sourcePath: string, filePath: string): string {
     const ext = filePath.slice(filePath.lastIndexOf(".")) || "";
-    const baseDir = this.extractBaseDir(sourcePath);
+    const baseDir = sourcePath.includes("*")
+      ? this.extractBaseDir(sourcePath)
+      : sourcePath.slice(0, sourcePath.lastIndexOf("/") + 1);
     let rel = filePath.startsWith(baseDir)
       ? filePath.slice(baseDir.length)
       : filePath;

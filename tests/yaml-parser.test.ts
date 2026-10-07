@@ -2,6 +2,68 @@ import { describe, test, expect } from "vitest";
 import { parseYAML } from "../src/parser/yaml.js";
 
 describe("parseYAML", () => {
+  describe("blank lines (#46)", () => {
+    test.each([
+      {
+        name: "M1: before a nested list of objects",
+        rawContent: "requires:\n\n  - to: A\n    why: x",
+        expected: { requires: [{ to: "A", why: "x" }] },
+      },
+      {
+        name: "M2: before a nested map",
+        rawContent: "meta:\n\n  author: x\n  year: 1",
+        expected: { meta: { author: "x", year: 1 } },
+      },
+      {
+        name: "between list items",
+        rawContent: "tags:\n  - a\n\n  - b",
+        expected: { tags: ["a", "b"] },
+      },
+      {
+        name: "whitespace-only lines with different indentation",
+        rawContent: "meta:\n \n\t\n    \n  author: x",
+        expected: { meta: { author: "x" } },
+      },
+      {
+        name: "trailing blank lines",
+        rawContent: "meta:\n  author: x\n\n   \n",
+        expected: { meta: { author: "x" } },
+      },
+      {
+        name: "before a multiline inline array",
+        rawContent: "tags:\n\n  [a,\n  b]",
+        expected: { tags: ["a", "b"] },
+      },
+      {
+        name: "inside a multiline inline array starting on the key line",
+        rawContent: "tags: [a,\n\n  b]",
+        expected: { tags: ["a", "b"] },
+      },
+      {
+        name: "inside a multiline inline array starting on the next line",
+        rawContent: "tags:\n  [a,\n\n  b]",
+        expected: { tags: ["a", "b"] },
+      },
+      {
+        name: "before a key at the same indentation",
+        rawContent: "a:\n\n\nb: 1",
+        expected: { a: undefined, b: 1 },
+      },
+      {
+        name: "before a key at a shallower indentation",
+        rawContent: "p:\n  q:\n\n\nr: 1",
+        expected: { p: { q: undefined }, r: 1 },
+      },
+    ])("$name", ({ rawContent, expected }) => {
+      const withoutBlankLines = rawContent
+        .split("\n")
+        .filter((line) => line.trim() !== "")
+        .join("\n");
+      const result = parseYAML({ rawContent });
+      expect(result).toEqual(expected);
+      expect(result).toEqual(parseYAML({ rawContent: withoutBlankLines }));
+    });
+  });
   describe("basic key-value", () => {
     test("simple string value", () => {
       const result = parseYAML({ rawContent: "name: foo" });
