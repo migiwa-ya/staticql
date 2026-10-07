@@ -76,7 +76,17 @@ export function resolveDirectRelation(
   const localKeys = resolveField(row, rel.localKey).flat();
 
   let matches: SourceRecord[] = [];
-  if (localKeys.length === 1) {
+  if (relType === "hasOne" || relType === "hasMany") {
+    const seen = new Set<SourceRecord>();
+    for (const k of localKeys) {
+      for (const target of foreignMap.get(k) ?? []) {
+        if (!seen.has(target)) {
+          seen.add(target);
+          matches.push(target);
+        }
+      }
+    }
+  } else if (localKeys.length === 1) {
     for (const k of localKeys) {
       const arr = foreignMap.get(k);
       if (arr) matches.push(...arr);
