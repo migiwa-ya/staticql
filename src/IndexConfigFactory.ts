@@ -111,15 +111,13 @@ export class IndexConfigFactory {
   ): [string, Relation][] {
     const fromOtherSources = Object.entries(allSources)
       .filter(([name]) => name !== sourceName)
-      .map(([_, s]) =>
-        Object.entries(s.relations ?? {}).find(([_, rel]) =>
+      .flatMap(([_, s]) =>
+        Object.entries(s.relations ?? {}).filter(([_, rel]) =>
           isThroughRelation(rel)
             ? rel.to === sourceName || rel.through === sourceName
             : rel.to === sourceName
         )
-      )
-      .filter(Boolean)
-      .filter((e): e is [string, Relation] => !!e);
+      );
 
     return [...fromOtherSources, ...Object.entries(source.relations ?? {})];
   }

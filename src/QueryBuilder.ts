@@ -382,33 +382,24 @@ export class QueryBuilder<T extends SourceRecord, TIndexKey extends string> {
       { localKey: string; foreignKey: string; type?: string }
     >;
 
-    let foreignData: any[] = [];
-
-    if (directRel.type === "belongsTo" || directRel.type === "belongsToMany") {
-      // For belongsTo and belongsToMany, use foreignKey-based filtering
-      const allLocalVals = result.flatMap((row) =>
-        resolveField(row, directRel.localKey)
-      );
-
-      const uniqueIndexes =
-        (await this.getMatchedIndexes(
-          directRel.to,
-          [{ field: directRel.foreignKey, op: "in", value: allLocalVals }],
-          this.resolver.resolveOne(directRel.to)
-        )) ?? [];
-
-      foreignData = await this.loader.loadBySlugs(
+    const allLocalVals = result.flatMap((row) =>
+      resolveField(row, directRel.localKey)
+    );
+    const uniqueIndexes =
+      (await this.getMatchedIndexes(
         directRel.to,
-        this.sortRelationIndexes(uniqueIndexes).map((index) => Object.keys(index.ref)).flat()
-      );
-    } else {
-      // For hasOne and hasMany, localKey values are treated as slugs
-      const allSlugs = result.flatMap((row) =>
-        resolveField(row, directRel.localKey)
-      );
-      const uniqueSlugs = Array.from(new Set(allSlugs));
-      foreignData = await this.loader.loadBySlugs(directRel.to, uniqueSlugs);
-    }
+        [{ field: directRel.foreignKey, op: "in", value: allLocalVals }],
+        this.resolver.resolveOne(directRel.to)
+      )) ?? [];
+
+    const relationIndexes =
+      directRel.type === "belongsTo" || directRel.type === "belongsToMany"
+        ? this.sortRelationIndexes(uniqueIndexes)
+        : uniqueIndexes;
+    const uniqueSlugs = Array.from(new Set(
+      relationIndexes.flatMap((index) => Object.keys(index.ref))
+    ));
+    const foreignData = await this.loader.loadBySlugs(directRel.to, uniqueSlugs);
 
     return result.map((row) => {
       if (
