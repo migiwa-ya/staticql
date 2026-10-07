@@ -40,6 +40,17 @@ type EntryGroup = Map<
 // Record<sourceName, {["foreignMap" | "targetMap"]: Map<value, SourceRecord[]>
 type RelationMaps = Record<string, DirectRelationMap | ThroughRelationMap>;
 
+type IncrementalDirectView = DirectRelationMap & { targets: SourceRecord[] };
+type IncrementalThroughView = ThroughRelationMap & {
+  throughRecords: SourceRecord[];
+  toRecords: SourceRecord[];
+};
+type IncrementalView = IncrementalDirectView | IncrementalThroughView;
+type IncrementalRelationData = Map<
+  string,
+  Map<string, { A: IncrementalView; D: IncrementalView }>
+>;
+
 /**
  * IndexBuilder: handles full and incremental index building.
  */
@@ -135,7 +146,10 @@ export class IndexBuilder {
       diffMap.get(e.source)!.set(e.slug, e);
     }
 
-    const dataMap = new Map<string, Set<SourceRecord>>();
+    const changedRows = new Map<string, Set<SourceRecord>>();
+    const addedRecords = new Map<string, Map<string, SourceRecord>>();
+    const deletedRecords = new Map<string, Map<string, SourceRecord>>();
+    const deletedRows = new Set<SourceRecord>();
 
     for (const [source, entries] of entryGroup.entries()) {
       const rsc = this.resolver.resolveOne(source);
@@ -151,10 +165,12 @@ export class IndexBuilder {
       /* --- 2. 実ファイルをロード (存在する想定だけ) -------------- */
       const loaded = await this.sourceLoader.loadBySlugs(source, slugsToLoad);
 
-      if (!dataMap.has(rsc.name)) dataMap.set(rsc.name, new Set());
+      if (!changedRows.has(rsc.name)) changedRows.set(rsc.name, new Set());
+      addedRecords.set(rsc.name, new Map(loaded.map((rec) => [rec.slug, rec])));
+      deletedRecords.set(rsc.name, new Map());
 
       /* 2-A. 取得できたレコードはそのまま */
-      loaded.forEach((rec) => dataMap.get(rsc.name)!.add(rec));
+      loaded.forEach((rec) => changedRows.get(rsc.name)!.add(rec));
 
       const loadedSlugs = new Set(loaded.map((r) => r.slug));
 
@@ -163,14 +179,17 @@ export class IndexBuilder {
         if (loadedSlugs.has(slug)) continue; // 取れている
         const diff = diffMap.get(source)!.get(slug);
         if (!diff) continue; // 保険
-        dataMap.get(rsc.name)!.add(makePseudo(diff));
+        changedRows.get(rsc.name)!.add(makePseudo(diff));
       }
 
       /* --- 3. 削除 (D) は必ず擬似レコード ----------------------- */
       for (const { slug } of delOnly) {
         const diff = diffMap.get(source)!.get(slug);
         if (!diff) continue;
-        dataMap.get(rsc.name)!.add(makePseudo(diff));
+        const record = makePseudo(diff);
+        changedRows.get(rsc.name)!.add(record);
+        deletedRecords.get(rsc.name)!.set(slug, record);
+        deletedRows.add(record);
       }
     }
 
@@ -178,17 +197,19 @@ export class IndexBuilder {
       return { slug: diff.slug, ...diff.fields } as SourceRecord;
     }
 
-    const relationMaps: RelationMaps = {};
-    for (const [sourceName, data] of dataMap) {
+    // Preserve the existing missing-relation errors independently of the
+    // complete datasets used below. Only changed sources need resolving.
+    const legacy = new Map(changedRows);
+    for (const [sourceName, data] of changedRows) {
       const rsc = this.resolver.resolveOne(sourceName);
       const relations = rsc.relations ?? [];
 
-      for (const [key, rel] of Object.entries(relations)) {
+      for (const rel of Object.values(relations)) {
         if (isThroughRelation(rel)) {
           // is through relation
 
-          if (!dataMap.get(rel.to)) {
-            let through = dataMap.get(rel.through);
+          if (!legacy.get(rel.to)) {
+            let through = legacy.get(rel.through);
             if (!through) {
               const prefixIndexLine = (
                 await Promise.all(
@@ -224,10 +245,10 @@ export class IndexBuilder {
                 );
               }
 
-              dataMap.set(rel.through, through);
+              legacy.set(rel.through, through);
             }
 
-            let to = dataMap.get(rel.to);
+            let to = legacy.get(rel.to);
             if (!to) {
               const prefixIndexLine = (
                 await Promise.all(
@@ -256,24 +277,13 @@ export class IndexBuilder {
                 );
               }
 
-              dataMap.set(rel.to, to);
+              legacy.set(rel.to, to);
             }
           }
-
-          relationMaps[key] = {
-            targetMap: buildForeignKeyMap(
-              [...dataMap.get(rel.to)!],
-              rel.targetForeignKey
-            ),
-            throughMap: buildForeignKeyMap(
-              [...dataMap.get(rel.through)!],
-              rel.throughForeignKey
-            ),
-          };
         } else {
           // is direct relation
 
-          if (!dataMap.get(rel.to)) {
+          if (!legacy.get(rel.to)) {
             const localKeys = [...data]
               .map((s): string[] => resolveField(s, rel.localKey))
               .flat();
@@ -302,16 +312,113 @@ export class IndexBuilder {
               );
             }
 
-            dataMap.set(rel.to, to);
+            legacy.set(rel.to, to);
           }
-
-          relationMaps[key] = {
-            foreignMap: buildForeignKeyMap(
-              [...dataMap.get(rel.to)!],
-              rel.foreignKey
-            ),
-          };
         }
+      }
+    }
+
+    // Index lookups still describe the previous state. Additions use current
+    // records, while deletions must resolve the old values from diff fields.
+    const collectTargets = async (
+      sourceName: string,
+      slugs: string[],
+      view: "A" | "D"
+    ): Promise<SourceRecord[]> => {
+      const added = addedRecords.get(sourceName);
+      const deleted = deletedRecords.get(sourceName);
+      const unique = [...new Set(slugs)];
+      const records = await this.sourceLoader.loadBySlugs(
+        sourceName,
+        unique.filter((slug) => !deleted?.has(slug) && !added?.has(slug))
+      );
+      const targets = new Map(records.map((record) => [record.slug, record]));
+      if (view === "A") {
+        for (const [slug, record] of added ?? []) targets.set(slug, record);
+      } else {
+        for (const slug of unique) {
+          const record = deleted?.get(slug);
+          if (record) targets.set(slug, record);
+        }
+      }
+      return [...targets.values()];
+    };
+
+    const findSlugs = async (
+      sourceName: string,
+      field: string,
+      keys: string[]
+    ): Promise<string[]> => {
+      const lines = await Promise.all(
+        keys.map((key) => this.reader.findIndexLines(sourceName, field, key))
+      );
+      return [...new Set(
+        lines.flatMap((result) =>
+          (result ?? []).flatMap((line) => Object.keys(line.ref))
+        )
+      )];
+    };
+
+    const relationData: IncrementalRelationData = new Map();
+    for (const [sourceName, data] of changedRows) {
+      const rsc = this.resolver.resolveOne(sourceName);
+      const sourceRelations = new Map<
+        string,
+        { A: IncrementalView; D: IncrementalView }
+      >();
+      relationData.set(sourceName, sourceRelations);
+      for (const [key, rel] of Object.entries(rsc.relations ?? {})) {
+        const buildView = async (view: "A" | "D"): Promise<IncrementalView> => {
+          const rows = [...data].filter(
+            (row) => deletedRows.has(row) === (view === "D")
+          );
+          if (isThroughRelation(rel)) {
+            const throughRecords = rows.length === 0 ? [] :
+              await collectTargets(
+                rel.through,
+                await findSlugs(
+                  rel.through,
+                  rel.throughForeignKey,
+                  rows.flatMap((row) => resolveField(row, rel.sourceLocalKey))
+                ),
+                view
+              );
+            const toRecords = rows.length === 0 ? [] :
+              await collectTargets(
+                rel.to,
+                await findSlugs(
+                  rel.to,
+                  rel.targetForeignKey,
+                  throughRecords.flatMap((row) => resolveField(row, rel.throughLocalKey))
+                ),
+                view
+              );
+            return {
+              throughRecords,
+              toRecords,
+              throughMap: buildForeignKeyMap(throughRecords, rel.throughForeignKey),
+              targetMap: buildForeignKeyMap(toRecords, rel.targetForeignKey),
+            };
+          }
+          const targets = rows.length === 0 ? [] :
+            await collectTargets(
+              rel.to,
+              await findSlugs(
+                rel.to,
+                rel.foreignKey,
+                rows.flatMap((row) => resolveField(row, rel.localKey))
+              ),
+              view
+            );
+          return {
+            targets,
+            foreignMap: buildForeignKeyMap(targets, rel.foreignKey),
+          };
+        };
+        sourceRelations.set(key, {
+          A: await buildView("A"),
+          D: await buildView("D"),
+        });
       }
     }
 
@@ -321,24 +428,29 @@ export class IndexBuilder {
 
       if (!rsc.indexes || !relations) continue;
 
-      const records = [...dataMap.get(rsc.name)!].map((row) => {
+      const records = [...changedRows.get(rsc.name)!].map((row) => {
         const result = { ...row };
         for (const [key, rel] of Object.entries(relations)) {
+          const view = relationData.get(rsc.name)!.get(key)![
+            deletedRows.has(row) ? "D" : "A"
+          ];
           if (isThroughRelation(rel)) {
+            const throughView = view as IncrementalThroughView;
             result[key] = resolveThroughRelation(
               row,
               rel,
-              [...dataMap.get(rel.through)!],
-              [...dataMap.get(rel.to)!],
-              (relationMaps[key] as ThroughRelationMap).targetMap,
-              (relationMaps[key] as ThroughRelationMap).throughMap
+              throughView.throughRecords,
+              throughView.toRecords,
+              throughView.targetMap,
+              throughView.throughMap
             );
           } else {
+            const directView = view as IncrementalDirectView;
             result[key] = resolveDirectRelation(
               row,
               rel,
-              [...dataMap.get(rel.to)!],
-              (relationMaps[key] as DirectRelationMap).foreignMap
+              directView.targets,
+              directView.foreignMap
             );
           }
         }
