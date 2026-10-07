@@ -38,6 +38,25 @@ export function isThroughRelation(rel: Relation): rel is ThroughRelation {
 }
 
 /**
+ * Compare strings by UTF-16 code units, independently of locale.
+ */
+export function compareOrdinal(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** Match the walker's postorder traversal, including in descending order. */
+export function comparePrefixPath(a: string, b: string, desc: boolean): number {
+  const aParts = a.split("/");
+  const bParts = b.split("/");
+  for (let i = 0; i < Math.min(aParts.length, bParts.length); i++) {
+    const comparison = compareOrdinal(aParts[i], bParts[i]);
+    if (comparison) return desc ? -comparison : comparison;
+  }
+  // Children precede their parent in both walker directions (#55).
+  return bParts.length - aParts.length;
+}
+
+/**
  * Sort PrefixIndexLine comparator factory.
  */
 export function indexSort<T>(keys: (keyof T)[] = ["v", "vs"] as (keyof T)[]) {
@@ -46,7 +65,7 @@ export function indexSort<T>(keys: (keyof T)[] = ["v", "vs"] as (keyof T)[]) {
       const aVal = a[key];
       const bVal = b[key];
       if (typeof aVal === "string" && typeof bVal === "string") {
-        const result = aVal.localeCompare(bVal);
+        const result = compareOrdinal(aVal, bVal);
         if (result !== 0) return result;
       } else if (aVal !== bVal) {
         return aVal < bVal ? -1 : 1;

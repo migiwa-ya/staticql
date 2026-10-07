@@ -21,7 +21,7 @@ export type CursorObject = { slug: string; order: { [key: string]: string } };
 export function createPageInfo<T>(
   page: T[],
   pageSize: number,
-  startIndex: number,
+  startIndex: number | null,
   matchedLen: number,
   direction: "after" | "before",
   encodeCursor: (item: T) => string
@@ -30,10 +30,12 @@ export function createPageInfo<T>(
   let hasPreviousPage = false;
 
   if (direction === "after") {
-    hasNextPage = startIndex + (startIndex > 0 ? 1 : 0) + pageSize < matchedLen;
-    hasPreviousPage = startIndex + (startIndex > 0 ? 1 : 0) > 0;
+    const beginIdx = startIndex === null ? 0 : startIndex + 1;
+    const endIdx = Math.min(matchedLen, beginIdx + pageSize);
+    hasNextPage = endIdx < matchedLen;
+    hasPreviousPage = beginIdx > 0;
   } else {
-    const endIdx = startIndex;
+    const endIdx = startIndex === null ? matchedLen : startIndex;
     const beginIdx = Math.max(0, endIdx - pageSize);
     hasNextPage = endIdx < matchedLen;
     hasPreviousPage = beginIdx > 0;
@@ -59,17 +61,15 @@ export function createPageInfo<T>(
  */
 export function getPageSlice<T>(
   records: T[],
-  startIndex: number,
+  startIndex: number | null,
   pageSize: number,
   direction: "after" | "before"
 ): T[] {
   if (direction === "after") {
-    return records.slice(
-      startIndex + (startIndex > 0 ? 1 : 0),
-      startIndex + (startIndex > 0 ? 1 : 0) + pageSize
-    );
+    const beginIdx = startIndex === null ? 0 : startIndex + 1;
+    return records.slice(beginIdx, beginIdx + pageSize);
   } else {
-    const endIdx = startIndex;
+    const endIdx = startIndex === null ? records.length : startIndex;
     const beginIdx = Math.max(0, endIdx - pageSize);
     return records.slice(beginIdx, endIdx);
   }

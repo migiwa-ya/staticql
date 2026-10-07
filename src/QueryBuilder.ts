@@ -23,6 +23,8 @@ import {
 } from "./utils/pagenation.js";
 import { Fields, JoinableKeys, PrefixIndexLine } from "./utils/typs.js";
 import { asArray } from "./utils/normalize.js";
+import { compareOrdinal, comparePrefixPath, getPrefixIndexPath } from "./constants.js";
+import { toI } from "./utils/path.js";
 
 type Operator = "eq" | "startsWith" | "in";
 
@@ -151,6 +153,9 @@ export class QueryBuilder<T extends SourceRecord, TIndexKey extends string> {
    * @returns This instance (for method chaining).
    */
   pageSize(n: number): this {
+    if (!Number.isInteger(n) || n <= 0) {
+      throw new Error("pageSize must be a positive integer");
+    }
     this._pageSize = n;
     return this;
   }
@@ -209,10 +214,11 @@ export class QueryBuilder<T extends SourceRecord, TIndexKey extends string> {
       const slug = Object.keys(item.ref)[refsLength - 1];
       const orderValue = Object.values(item.ref)[refsLength - 1][orderByKey];
 
-      return encodeCursor({ order: { [orderByKey]: orderValue[0] }, slug });
+      return encodeCursor({ order: { [orderByKey]: orderValue?.[0] }, slug });
     };
 
-    if (matched.length) {
+    if (filters.length) {
+      matched = await this.sortMatchedIndexes(matched, rsc);
       const cursorObj = this._cursorValue
         ? decodeCursor(this._cursorValue)
         : undefined;
@@ -306,24 +312,13 @@ export class QueryBuilder<T extends SourceRecord, TIndexKey extends string> {
   private getStartIdx(
     matched: PrefixIndexLine[],
     cursorObj?: CursorObject
-  ): number {
-    if (!cursorObj) return 0;
-    const orderByKey = String(this._orderByKey);
-
-    return matched.findIndex((item) => {
-      for (const [slug, values] of Object.entries(item.ref)) {
-        let match = slug === cursorObj.slug;
-
-        if (orderByKey && cursorObj.order[orderByKey]) {
-          const orderValue = values[orderByKey]?.[0];
-          match = match && orderValue === cursorObj.order[orderByKey];
-        }
-
-        return match;
-      }
-
-      return false;
-    });
+  ): number | null {
+    if (!cursorObj) return null;
+    const index = matched.findIndex((item) =>
+      Object.prototype.hasOwnProperty.call(item.ref, cursorObj.slug)
+    );
+    if (index < 0) throw new Error("Cursor is not in the query result");
+    return index;
   }
 
   /**
@@ -404,7 +399,7 @@ export class QueryBuilder<T extends SourceRecord, TIndexKey extends string> {
 
       foreignData = await this.loader.loadBySlugs(
         directRel.to,
-        uniqueIndexes.map((index) => Object.keys(index.ref)).flat()
+        this.sortRelationIndexes(uniqueIndexes).map((index) => Object.keys(index.ref)).flat()
       );
     } else {
       // For hasOne and hasMany, localKey values are treated as slugs
@@ -466,7 +461,7 @@ export class QueryBuilder<T extends SourceRecord, TIndexKey extends string> {
 
     const throughData = await this.loader.loadBySlugs(
       rel.through,
-      uniqueSourceIndexes.map((index) => Object.keys(index.ref)).flat()
+      this.sortRelationIndexes(uniqueSourceIndexes).map((index) => Object.keys(index.ref)).flat()
     );
 
     const targetSlugs = throughData.flatMap((t) =>
@@ -478,12 +473,12 @@ export class QueryBuilder<T extends SourceRecord, TIndexKey extends string> {
       (await this.getMatchedIndexes(
         rel.to,
         [{ field: rel.targetForeignKey, op: "in", value: targetSlugs }],
-        this.resolver.resolveOne(rel.through)
+        this.resolver.resolveOne(rel.to)
       )) ?? [];
 
     const targetData = await this.loader.loadBySlugs(
       rel.to,
-      uniqueTargetIndexes.map((index) => Object.keys(index.ref)).flat()
+      this.sortRelationIndexes(uniqueTargetIndexes).map((index) => Object.keys(index.ref)).flat()
     );
 
     return result.map((row) => {
@@ -507,126 +502,57 @@ export class QueryBuilder<T extends SourceRecord, TIndexKey extends string> {
   private async getMatchedIndexes(
     sourceName: string,
     indexedFilters: Filter[],
-    rsc: RSC,
-    andMode: boolean = true
+    rsc: RSC
   ) {
     let matched: PrefixIndexLine[] | null = null;
-
-    for (let i = 0; i < indexedFilters.length; i++) {
-      const filter = indexedFilters[i];
-      const { field, op, value } = filter;
-      let matchedIndexes: PrefixIndexLine[] = [];
-
-      // direct slug lookup: eq or in on slug can bypass index files
-      if (
-        field === "slug" &&
-        (op === "eq" || (op === "in" && Array.isArray(value)))
-      ) {
-        const slugs = asArray(value).map((v) => String(v));
-        matchedIndexes = slugs.map((slug) => ({
-          v: slug,
-          vs: slug,
-          ref: { [slug]: { slug: [slug] } },
-        }));
-      } else if (andMode && matched && i > 0) {
-        // for the second (narrow down from matched)
-
-        const indexConfig = rsc.indexes?.[field];
-        const depth = indexConfig?.depth ?? Indexer.indexDepth;
-
-        let entries: PrefixIndexLine[] = [];
-        for (const v of asArray(value)) {
-          const searchValue = String(v);
-          const searchPrefix = this.indexer.getPrefixIndexPath(
-            searchValue,
-            depth
-          );
-
-          const candidates = matched.filter((m) => {
-            const mSlug = Object.keys(m.ref)[0];
-            const mField = m.ref[mSlug]?.[field];
-            if (!mField) return false;
-            return mField.some((p: string) =>
-              op === "startsWith"
-                ? p.startsWith(searchPrefix)
-                : p === searchPrefix
-            );
-          });
-
-          // no more match
-          if (!candidates.length) continue;
-
-          if (searchValue.length <= depth) {
-            // index match
-
-            entries.push(...candidates);
-          } else {
-            // partial index match
-
-            const found = await this.indexer.findIndexLines(
-              sourceName,
-              field,
-              searchValue
-            );
-            if (!found) continue;
-
-            // extract match
-            entries.push(
-              ...matched.filter((m) => {
-                const mSlug = Object.keys(m.ref)[0];
-                return found.some((line) => !!line.ref[mSlug]);
-              })
-            );
-          }
-        }
-
-        matchedIndexes.push(...entries);
-
-        // no more match
-        if (!matchedIndexes.length) return [];
+    let slugSet: Set<string> | null = null;
+    const indexFilters: Filter[] = [];
+    for (const filter of indexedFilters) {
+      if (filter.field === "slug" && filter.op !== "startsWith") {
+        const values = new Set(asArray(filter.value).map(String));
+        slugSet = slugSet === null
+          ? values
+          : new Set<string>([...slugSet].filter((slug: string) => values.has(slug)));
       } else {
-        // for the first
-
-        if (Object.keys(rsc.indexes ?? {}).length) {
-          if (op === "eq") {
-            matchedIndexes =
-              (await this.indexer.findIndexLines(
-                sourceName,
-                field,
-                String(value)
-              )) ?? [];
-          } else if (op === "startsWith") {
-            matchedIndexes =
-              (await this.indexer.findIndexLines(
-                sourceName,
-                field,
-                String(value),
-                (indexValue, argValue) => indexValue.startsWith(argValue)
-              )) ?? [];
-          } else if (op === "in" && Array.isArray(value)) {
-            const buff: Set<Promise<PrefixIndexLine[] | null>> = new Set();
-            for (const keyValue of value) {
-              buff.add(
-                this.indexer.findIndexLines(sourceName, field, String(keyValue))
-              );
-            }
-
-            const f = (await Promise.all([...buff])).flat();
-            matchedIndexes.push(...f.filter((i): i is PrefixIndexLine => !!i));
-          }
-        }
-      }
-
-      if (andMode) {
-        matched = matchedIndexes;
-      } else {
-        matched = [...(matched ?? []), ...matchedIndexes];
+        indexFilters.push(filter);
       }
     }
 
-    const matchedArray = matched ?? [];
+    for (const { field, op, value } of indexFilters) {
+      const depth = rsc.indexes?.[field]?.depth ?? Indexer.indexDepth;
+      const results = await Promise.all(asArray(value).map(async (v) => {
+        const searchValue = String(v);
+        if (op !== "startsWith" && [...searchValue].length < depth) {
+          return this.indexer.findExactIndexLines(sourceName, field, searchValue);
+        }
+        return (await this.indexer.findIndexLines(
+          sourceName,
+          field,
+          searchValue,
+          op === "startsWith" ? (indexValue, argValue) => indexValue.startsWith(argValue) : undefined
+        )) ?? [];
+      }));
+      const unique = this.indexer.flatPrefixIndexLine(results.flat());
+      const foundSlugs = new Set(unique.map((line) => Object.keys(line.ref)[0]));
+      matched = matched === null
+        ? unique
+        : matched.filter((line) => foundSlugs.has(Object.keys(line.ref)[0]));
+      if (!matched.length) return [];
+    }
 
-    matchedArray.sort((a, b) => {
+    if (matched !== null) {
+      return slugSet === null ? matched : matched.filter((line) => slugSet.has(Object.keys(line.ref)[0]));
+    }
+    return [...(slugSet ?? [])].map((slug) => ({
+      v: slug,
+      vs: slug,
+      ref: { [slug]: { slug: [slug] } },
+    }));
+  }
+
+  /** Preserve the existing ordering of joined arrays. */
+  private sortRelationIndexes(matched: PrefixIndexLine[]) {
+    return matched.sort((a, b) => {
       const [, avs] = Object.entries(a.ref)[0];
       const [, bvs] = Object.entries(b.ref)[0];
       const av = String(avs[String(this._orderByKey)]);
@@ -641,6 +567,64 @@ export class QueryBuilder<T extends SourceRecord, TIndexKey extends string> {
         : av.localeCompare(bv);
     });
 
-    return matchedArray.length ? matchedArray : [];
+  }
+
+  private async sortMatchedIndexes(matched: PrefixIndexLine[], rsc: RSC) {
+    const orderByKey = String(this._orderByKey);
+    const config = rsc.indexes?.[orderByKey];
+    if (!config) throw new Error(`[${this.sourceName}] needs index: ${orderByKey}`);
+    const desc = this._orderByDirection === "desc";
+    const groups = new Map<string, PrefixIndexLine[]>();
+    const missing: PrefixIndexLine[] = [];
+
+    for (let item of matched) {
+      const slug = Object.keys(item.ref)[0];
+      if (orderByKey !== "slug" && !item.ref[slug][orderByKey]) {
+        const found = await this.indexer.findIndexLines(this.sourceName, "slug", slug);
+        item = found?.[0] ?? item;
+      }
+      const prefixes = orderByKey === "slug"
+        ? [getPrefixIndexPath(slug, config.depth)]
+        : item.ref[slug][orderByKey];
+      if (!prefixes?.length) {
+        missing.push(item);
+        continue;
+      }
+      const firstPrefix = [...prefixes].sort((a, b) => comparePrefixPath(a, b, desc))[0];
+      const group = groups.get(firstPrefix) ?? [];
+      group.push(item);
+      groups.set(firstPrefix, group);
+    }
+
+    const sorted: PrefixIndexLine[] = [];
+    for (const prefix of [...groups.keys()].sort((a, b) => comparePrefixPath(a, b, desc))) {
+      const group = groups.get(prefix)!;
+      const slugOf = (line: PrefixIndexLine) => Object.keys(line.ref)[0];
+      if (group.length > 1 && orderByKey === "slug") {
+        group.sort((a, b) => compareOrdinal(slugOf(a), slugOf(b)) * (desc ? -1 : 1));
+      } else if (group.length > 1) {
+        const positions = new Map<string, number>();
+        let position = 0;
+        for await (const line of this.indexer.readIndexFileLines(toI(config.dir, prefix), desc)) {
+          for (const slug of Object.keys(line.ref)) {
+            if (!positions.has(slug)) positions.set(slug, position);
+          }
+          position++;
+        }
+        group.sort((a, b) => {
+          const aPosition = positions.get(slugOf(a));
+          const bPosition = positions.get(slugOf(b));
+          if (aPosition === undefined && bPosition === undefined) {
+            return compareOrdinal(slugOf(a), slugOf(b));
+          }
+          if (aPosition === undefined) return 1;
+          if (bPosition === undefined) return -1;
+          return aPosition - bPosition;
+        });
+      }
+      sorted.push(...group);
+    }
+    missing.sort((a, b) => compareOrdinal(Object.keys(a.ref)[0], Object.keys(b.ref)[0]));
+    return [...sorted, ...missing];
   }
 }

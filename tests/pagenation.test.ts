@@ -34,9 +34,21 @@ describe("encodeCursor / decodeCursor", () => {
 describe("getPageSlice", () => {
   const records = ["a", "b", "c", "d", "e", "f", "g", "h"];
 
-  test("direction 'after', startIndex 0 returns first pageSize items", () => {
-    const result = getPageSlice(records, 0, 3, "after");
+  test("direction 'after', no cursor returns first pageSize items", () => {
+    const result = getPageSlice(records, null, 3, "after");
     expect(result).toEqual(["a", "b", "c"]);
+  });
+
+  test("direction 'after', cursor at index 0 is excluded", () => {
+    expect(getPageSlice(records, 0, 3, "after")).toEqual(["b", "c", "d"]);
+  });
+
+  test("direction 'before', no cursor returns the last page", () => {
+    expect(getPageSlice(records, null, 3, "before")).toEqual(["f", "g", "h"]);
+  });
+
+  test("direction 'before', cursor at index 0 returns an empty page", () => {
+    expect(getPageSlice(records, 0, 3, "before")).toEqual([]);
   });
 
   test("direction 'after', startIndex > 0 skips startIndex+1 items", () => {
@@ -58,7 +70,7 @@ describe("getPageSlice", () => {
   });
 
   test("empty records array returns empty array", () => {
-    const result = getPageSlice([], 0, 3, "after");
+    const result = getPageSlice([], null, 3, "after");
     expect(result).toEqual([]);
   });
 });
@@ -66,9 +78,9 @@ describe("getPageSlice", () => {
 describe("createPageInfo", () => {
   const encode = (item: string) => item;
 
-  test("first page (startIndex=0, after): hasPreviousPage=false, hasNextPage=true when more items exist", () => {
+  test("first page (no cursor, after): hasPreviousPage=false, hasNextPage=true when more items exist", () => {
     const page = ["a", "b", "c"];
-    const info = createPageInfo(page, 3, 0, 10, "after", encode);
+    const info = createPageInfo(page, 3, null, 10, "after", encode);
     expect(info.hasPreviousPage).toBe(false);
     expect(info.hasNextPage).toBe(true);
     expect(info.startCursor).toBe("a");
@@ -77,7 +89,7 @@ describe("createPageInfo", () => {
 
   test("first page with exact fit: hasNextPage=false", () => {
     const page = ["a", "b", "c"];
-    const info = createPageInfo(page, 3, 0, 3, "after", encode);
+    const info = createPageInfo(page, 3, null, 3, "after", encode);
     expect(info.hasPreviousPage).toBe(false);
     expect(info.hasNextPage).toBe(false);
   });
@@ -102,11 +114,25 @@ describe("createPageInfo", () => {
 
   test("empty page: cursors are undefined", () => {
     const page: string[] = [];
-    const info = createPageInfo(page, 3, 0, 0, "after", encode);
+    const info = createPageInfo(page, 3, null, 0, "after", encode);
     expect(info.startCursor).toBeUndefined();
     expect(info.endCursor).toBeUndefined();
     expect(info.hasNextPage).toBe(false);
     expect(info.hasPreviousPage).toBe(false);
+  });
+
+  test("after cursor at index 0 reports an earlier page", () => {
+    const info = createPageInfo(["b", "c"], 2, 0, 3, "after", encode);
+    expect(info).toEqual({
+      hasPreviousPage: true, hasNextPage: false, startCursor: "b", endCursor: "c",
+    });
+  });
+
+  test("before without a cursor reports the last page", () => {
+    const info = createPageInfo(["c", "d"], 2, null, 4, "before", encode);
+    expect(info).toEqual({
+      hasPreviousPage: true, hasNextPage: false, startCursor: "c", endCursor: "d",
+    });
   });
 
   test("before direction: first page from the end", () => {
