@@ -26,4 +26,3 @@ export interface DiffProvider {
 export { GitDiffProvider } from "./git.js";
 export type { GitHubDiffProviderOptions } from "./github.js";
 export { GitHubDiffProvider } from "./github.js";
-export { FsDiffProvider } from "./fs.js";

@@ -30,22 +30,17 @@ export async function extractDiff(opts: ExtractDiffOpts): Promise<DiffEntry[]> {
   const results: DiffEntry[] = [];
 
   /* -------- helpers -------- */
-  const parse = async (text: string, ext: string): Promise<any[]> => {
-    if (!text) return [];
+  const parse = async (
+    text: string | null,
+    ext: string
+  ): Promise<{ records: any[]; isArray: boolean }> => {
+    const type = ext === ".md" ? "markdown"
+      : ext === ".yaml" || ext === ".yml" ? "yaml"
+      : ext === ".json" ? "json" : null;
+    if (!text || !type) return { records: [], isArray: false };
 
-    if (ext === ".md") {
-      return asArray(await parseByType("markdown", { rawContent: text }));
-    }
-
-    if (ext === ".yaml" || ext === ".yml") {
-      return asArray(await parseByType("yaml", { rawContent: text }));
-    }
-
-    if (ext === ".json") {
-      return asArray(await parseByType("json", { rawContent: text }));
-    }
-
-    return [];
+    const parsed = await parseByType(type, { rawContent: text });
+    return { records: asArray(parsed), isArray: Array.isArray(parsed) };
   };
 
   /* -------- git diff -------- */
@@ -71,16 +66,16 @@ export async function extractDiff(opts: ExtractDiffOpts): Promise<DiffEntry[]> {
       ? await provider.gitShow(baseRef, filePath)
       : null;
 
-    const headRecs = headText ? await parse(headText, ext) : [];
-    const baseRecs = baseText ? await parse(baseText, ext) : [];
+    const { records: headRecs, isArray: headIsArray } = await parse(headText, ext);
+    const { records: baseRecs, isArray: baseIsArray } = await parse(baseText, ext);
 
     headRecs.forEach((rec) => {
-      if (!rec.slug) {
+      if (!headIsArray || !rec.slug) {
         rec.slug = Resolver.getSlugFromPath(rsc.pattern, filePathBase);
       }
     });
     baseRecs.forEach((rec) => {
-      if (!rec.slug) {
+      if (!baseIsArray || !rec.slug) {
         rec.slug = Resolver.getSlugFromPath(rsc.pattern, filePathBase);
       }
     });
