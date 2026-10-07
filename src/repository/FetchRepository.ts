@@ -2,6 +2,7 @@ import { SourceConfigResolver as Resolver } from "../SourceConfigResolver.js";
 import { parsePrefixDict } from "../utils/normalize.js";
 import { joinPath, toI, toP } from "../utils/path.js";
 import type { StorageRepository } from "./StorageRepository.js";
+import { NotFoundError } from "./errors.js";
 
 /**
  * FetchRepository: A browser-compatible StorageRepository implementation.
@@ -28,6 +29,12 @@ export class FetchRepository implements StorageRepository {
     this.resolver = resolver;
   }
 
+  private checkResponse(res: Response, path: string, url: string): void {
+    if (res.ok) return;
+    if (res.status === 404) throw new NotFoundError(path);
+    throw new Error(`Failed to fetch ${url}: HTTP ${res.status}`);
+  }
+
   /**
    * Reads a file from the public directory using fetch.
    *
@@ -52,7 +59,7 @@ export class FetchRepository implements StorageRepository {
     }
 
     const res = await fetch(url);
-    if (!res.ok) throw new Error(`Failed to fetch: ${url}`);
+    this.checkResponse(res, path, url);
     return await res.text();
   }
 
@@ -60,12 +67,15 @@ export class FetchRepository implements StorageRepository {
    * Checks if a file exists by sending a HEAD request.
    *
    * @param path - Relative path from base URL.
-   * @returns True if the file is accessible; false otherwise.
+   * @returns True on success; false only for HTTP 404.
+   * @throws On other HTTP responses or network failures.
    */
   async exists(path: string): Promise<boolean> {
     const url = this.baseUrl + path.replace(/^\/+/, "");
     const res = await fetch(url, { method: "HEAD" });
-    return res.ok;
+    if (res.status === 404) return false;
+    this.checkResponse(res, path, url);
+    return true;
   }
 
   /**
@@ -154,8 +164,9 @@ export class FetchRepository implements StorageRepository {
       }
     }
 
-    const res = await fetch(`${this.baseUrl}${path}`);
-    if (!res.ok) throw new Error(`Failed to fetch ${path}`);
+    const url = `${this.baseUrl}${path}`;
+    const res = await fetch(url);
+    this.checkResponse(res, path, url);
     return res.body!;
   }
 

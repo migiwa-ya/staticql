@@ -242,8 +242,12 @@ describe("where ordering matches first occurrences in the walker", () => {
     expect(names.data.slice(-2).map((item) => item.slug)).toEqual(["iota", "kappa"]);
     const code = await query().where("group", "eq", "all").orderBy("code", direction).pageSize(100).exec();
     const codeSlugs = code.data.map((item) => item.slug);
-    expect(codeSlugs.indexOf("beta")).toBeLessThan(codeSlugs.indexOf("alpha"));
-    expect(codeSlugs.indexOf("zeta")).toBeLessThan(codeSlugs.indexOf("epsilon"));
+    const orderedPairs = direction === "asc"
+      ? [["alpha", "beta"], ["epsilon", "zeta"]]
+      : [["beta", "alpha"], ["zeta", "epsilon"]];
+    for (const [first, second] of orderedPairs) {
+      expect(codeSlugs.indexOf(first)).toBeLessThan(codeSlugs.indexOf(second));
+    }
   });
 
   it("paginates records with missing order values without losing them", async () => {

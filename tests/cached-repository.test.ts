@@ -261,8 +261,12 @@ describe.each([
     expect(await repo.listFiles("d/*.txt")).toEqual([]);
     expect(await repo.listFiles("d/*.txt")).toEqual(await inner.listFiles("d/*.txt"));
     expect(await repo.exists("d/a.txt")).toBe(false);
-    await expect(repo.readFile("d/a.txt")).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(repo.openFileStream("d/a.txt")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(repo.readFile("d/a.txt")).rejects.toMatchObject({
+      name: "NotFoundError", path: "d/a.txt", cause: { code: "ENOENT" },
+    });
+    await expect(repo.openFileStream("d/a.txt")).rejects.toMatchObject({
+      name: "NotFoundError", path: "d/a.txt", cause: { code: "ENOENT" },
+    });
   });
 
   test("removeDir invalidates cached descendants and listings, including errors", async () => {
@@ -279,9 +283,15 @@ describe.each([
     expect(await repo.listFiles(".")).toEqual([]);
     await expect(inner.listFiles("d/*.txt")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(repo.listFiles("d/*.txt")).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(inner.readFile("d/a.txt")).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(repo.readFile("d/a.txt")).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(repo.openFileStream("d/a.txt")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(inner.readFile("d/a.txt")).rejects.toMatchObject({
+      name: "NotFoundError", path: "d/a.txt", cause: { code: "ENOENT" },
+    });
+    await expect(repo.readFile("d/a.txt")).rejects.toMatchObject({
+      name: "NotFoundError", path: "d/a.txt", cause: { code: "ENOENT" },
+    });
+    await expect(repo.openFileStream("d/a.txt")).rejects.toMatchObject({
+      name: "NotFoundError", path: "d/a.txt", cause: { code: "ENOENT" },
+    });
   });
 
   test("write and removeFile invalidate another spelling of the same path", async () => {
@@ -296,7 +306,9 @@ describe.each([
     await repo.removeFile("./d/a.txt");
 
     expect(await repo.exists("d/a.txt")).toBe(false);
-    await expect(repo.readFile("d/a.txt")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(repo.readFile("d/a.txt")).rejects.toMatchObject({
+      name: "NotFoundError", path: "d/a.txt", cause: { code: "ENOENT" },
+    });
   });
 
   test("a delayed read cannot cache old content for reads after a write", async () => {

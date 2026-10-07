@@ -1,4 +1,5 @@
 import { StorageRepository } from "./StorageRepository.js";
+import { NotFoundError } from "./errors.js";
 
 /**
  * R2-compatible bucket interface (Cloudflare Workers binding).
@@ -57,7 +58,8 @@ export class R2Repository implements StorageRepository {
    * Reads the content of a file from R2.
    *
    * @param path - Key within the bucket.
-   * @returns File content as string; empty string if not found.
+   * @returns File content as string; empty string if not found, retained for
+   * source-loading compatibility (an exception to StorageRepository.readFile).
    */
   async readFile(path: string): Promise<string> {
     const fullKey = this.buildKey(path);
@@ -71,14 +73,13 @@ export class R2Repository implements StorageRepository {
    *
    * @param path - Key within the bucket.
    * @returns ReadableStream of the file contents.
-   * @throws Error if the object does not exist.
+   * @throws NotFoundError if get returns null; other failures propagate.
    */
   async openFileStream(path: string): Promise<ReadableStream> {
     const fullKey = this.buildKey(path);
     const object = await this.bucket.get(fullKey);
-    if (!object || !object.body) {
-      throw new Error(`Object not found: ${fullKey}`);
-    }
+    if (object === null) throw new NotFoundError(fullKey);
+    if (!object.body) throw new Error(`R2 object has no body: ${fullKey}`);
     return object.body;
   }
 

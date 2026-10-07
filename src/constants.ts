@@ -44,7 +44,7 @@ export function compareOrdinal(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-/** Match the walker's postorder traversal, including in descending order. */
+/** Match the walker's preorder traversal and its descending reverse. */
 export function comparePrefixPath(a: string, b: string, desc: boolean): number {
   const aParts = a.split("/");
   const bParts = b.split("/");
@@ -52,8 +52,8 @@ export function comparePrefixPath(a: string, b: string, desc: boolean): number {
     const comparison = compareOrdinal(aParts[i], bParts[i]);
     if (comparison) return desc ? -comparison : comparison;
   }
-  // Children precede their parent in both walker directions (#55).
-  return bParts.length - aParts.length;
+  // Parents precede children in ascending order (#55).
+  return desc ? bParts.length - aParts.length : aParts.length - bParts.length;
 }
 
 /**

@@ -4,8 +4,22 @@ import {
   getPrefixIndexPath,
   isThroughRelation,
   indexSort,
+  comparePrefixPath,
 } from "../src/constants.js";
 import type { Relation } from "../src/types.js";
+
+describe("comparePrefixPath", () => {
+  test.each([
+    ["0061", "0061/0062", -1],
+    ["0061/0062", "0061", 1],
+    ["0061/0062", "0061/0063", -1],
+    ["0062", "0061/0063", 1],
+    ["0061", "0061", 0],
+  ] as const)("orders %s and %s in both directions", (a, b, sign) => {
+    expect(Math.sign(comparePrefixPath(a, b, false))).toBe(sign);
+    expect(comparePrefixPath(a, b, true) + comparePrefixPath(a, b, false)).toBe(0);
+  });
+});
 
 describe("getIndexDir", () => {
   test("returns index dir for sourceName and field", () => {
