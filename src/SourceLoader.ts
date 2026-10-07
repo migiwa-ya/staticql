@@ -131,7 +131,8 @@ export class SourceLoader<T extends SourceRecord> {
 
   /**
    * Parses and validates a single file.
-   * Ensures slug consistency if the file name pattern contains wildcards.
+   * Checks slug consistency for wildcard patterns. For single-file patterns,
+   * sets the slug from the file name, overriding any slug in the record.
    *
    * @param filePath - Logical file path (may include pattern).
    * @param rsc - The resolved source configuration.
@@ -152,7 +153,6 @@ export class SourceLoader<T extends SourceRecord> {
     let parsed = await parseByType(rsc.type, { rawContent: raw });
 
     if (
-      rsc.pattern.includes("*") &&
       !Array.isArray(parsed) &&
       typeof parsed === "object" &&
       parsed !== null
@@ -160,7 +160,7 @@ export class SourceLoader<T extends SourceRecord> {
       const slugFromPath = Resolver.getSlugFromPath(rsc.pattern, filePath);
       const parsedObj = parsed as Record<string, unknown>;
 
-      if (!parsedObj.slug) {
+      if (!rsc.pattern.includes("*") || !parsedObj.slug) {
         parsedObj.slug = slugFromPath;
       } else if (!slugFromPath.includes(String(parsedObj.slug))) {
         throw new Error(

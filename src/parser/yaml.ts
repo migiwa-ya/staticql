@@ -134,10 +134,12 @@ export function parseYAML({ rawContent }: { rawContent: string }): any {
             idx++;
             if (l.endsWith("]")) break;
           }
-          value = arrLines.join(" ").replace(/\s+/g, " ");
+          value = arrLines.join(" ").replace(/\s+/g, " ").trim();
         }
 
-        const nextLine = lines[idx];
+        let nextIdx = idx;
+        while (nextIdx < lines.length && !lines[nextIdx].trim()) nextIdx++;
+        const nextLine = lines[nextIdx];
         const match = nextLine?.match(/^(\s*)/);
 
         if (
@@ -162,7 +164,7 @@ export function parseYAML({ rawContent }: { rawContent: string }): any {
             idx++;
             if (l.endsWith("]")) break;
           }
-          const arrValue = arrLines.join(" ").replace(/\s+/g, " ");
+          const arrValue = arrLines.join(" ").replace(/\s+/g, " ").trim();
           result[key.trim()] = parseValue(arrValue);
         } else if (match && match[1].length > currentIndent) {
           const child = parseBlock(currentIndent + 2);
