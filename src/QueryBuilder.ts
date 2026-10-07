@@ -291,7 +291,9 @@ export class QueryBuilder<T extends SourceRecord, TIndexKey extends string> {
         ? page.length > this._pageSize
         : !!this._cursorValue;
 
-      page = page.slice(0, this._pageSize);
+      page = isAfter
+        ? page.slice(0, this._pageSize)
+        : page.slice(-this._pageSize);
 
       pageInfo = {
         hasPreviousPage,

@@ -17,14 +17,20 @@ export interface StorageRepository {
 
   /**
    * Reads the content of a file.
+   * Reject with NotFoundError for confirmed absence; reject other failures
+   * without converting them to absence. Index queries propagate those failures.
+   * Empty index content means no entries. For source-loading compatibility,
+   * the built-in R2Repository.readFile returns "" for an absent object.
    *
    * @param path - The file path to read.
    * @returns File content as a UTF-8 string.
    */
   readFile(path: string): Promise<string>;
 
-  /*
+  /**
    * Opens a file as a web-compatible ReadableStream.
+   * Reject with NotFoundError only for confirmed absence. Other open/read
+   * failures must propagate to the index query. Empty content means no entries.
    *
    * @param path - Relative path to the file (from the repository base directory)
    * @returns Promise that resolves to a ReadableStream for the file contents
@@ -52,7 +58,8 @@ export interface StorageRepository {
    * Checks if a file exists.
    *
    * @param path - The file path to check.
-   * @returns `true` if the file exists, otherwise `false`.
+   * @returns `true` if the file exists, `false` only for confirmed absence.
+   * @throws If existence cannot be determined (e.g. permission/network failure).
    */
   exists(path: string): Promise<boolean>;
 

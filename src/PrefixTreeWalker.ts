@@ -2,7 +2,7 @@ import { StorageRepository } from "./repository/StorageRepository.js";
 import {
   SourceConfigResolver as Resolver,
 } from "./SourceConfigResolver.js";
-import { joinPath, tail, toI, toP } from "./utils/path.js";
+import { joinPath, tail, toI, toP, trimSlash } from "./utils/path.js";
 import { readJsonlStream, readListStream } from "./utils/stream.js";
 import { PrefixIndexLine } from "./utils/typs.js";
 import { decodeCursor } from "./utils/pagenation.js";
@@ -10,6 +10,7 @@ import { cacheAsyncGen } from "./utils/cache.js";
 import { CacheProvider } from "./cache/CacheProvider.js";
 import { getPrefixIndexPath } from "./constants.js";
 import { IIndexReader } from "./IIndexReader.js";
+import { isNotFoundError } from "./repository/errors.js";
 
 /**
  * PrefixTreeWalker: handles prefix tree traversal and index reading.
@@ -20,6 +21,10 @@ export class PrefixTreeWalker implements IIndexReader {
     private readonly resolver: Resolver,
     private readonly cache: CacheProvider
   ) {}
+
+  private walkCacheKey(direction: "down" | "up", rootDir: string, startDir: string) {
+    return `walk:${direction}:${trimSlash(rootDir)}:${trimSlash(startDir)}`;
+  }
 
   /**
    * Get PrefixIndexLines for next page.
@@ -47,8 +52,8 @@ export class PrefixTreeWalker implements IIndexReader {
       : this.walkPrefixIndexesDownword;
 
     const gen = cacheAsyncGen(
-      (path: string) => indexWalker.bind(this)(path),
-      (path) => path,
+      (path: string) => indexWalker.bind(this)(path, rootDir),
+      (path) => this.walkCacheKey(isDesc ? "up" : "down", rootDir, path),
       this.cache
     );
 
@@ -104,8 +109,8 @@ export class PrefixTreeWalker implements IIndexReader {
       : this.walkPrefixIndexesUpword;
 
     const gen = cacheAsyncGen(
-      (path: string) => indexWalker.bind(this)(path),
-      (path) => path,
+      (path: string) => indexWalker.bind(this)(path, rootDir),
+      (path) => this.walkCacheKey(isDesc ? "down" : "up", rootDir, path),
       this.cache
     );
 
@@ -142,7 +147,13 @@ export class PrefixTreeWalker implements IIndexReader {
     indexPath: string,
     reverse: boolean
   ): AsyncGenerator<PrefixIndexLine> {
-    const stream = await this.repository.openFileStream(indexPath);
+    let stream: ReadableStream;
+    try {
+      stream = await this.repository.openFileStream(indexPath);
+    } catch (error) {
+      if (isNotFoundError(error)) return;
+      throw error;
+    }
     const reader = stream.getReader();
     const decoder = new TextDecoder();
 
@@ -186,10 +197,11 @@ export class PrefixTreeWalker implements IIndexReader {
     const repository = this.repository;
 
     const indexWalker = this.walkPrefixIndexesDownword;
+    const rootDir = rsc.indexes[field].dir;
 
     const gen = cacheAsyncGen(
-      (path: string) => indexWalker.bind(this)(path),
-      (path) => path,
+      (path: string) => indexWalker.bind(this)(path, rootDir),
+      (path) => this.walkCacheKey("down", rootDir, path),
       this.cache
     );
 
@@ -198,32 +210,31 @@ export class PrefixTreeWalker implements IIndexReader {
     let found: boolean | null = null;
 
     finder: for await (const indexPathEntry of gen(tail(indexPath).base)) {
+      let stream: ReadableStream;
       try {
-        const stream = await repository.openFileStream(indexPathEntry);
-        const reader = stream.getReader();
-        const decoder = new TextDecoder();
-
-        for await (const entry of readJsonlStream<PrefixIndexLine>(
-          reader,
-          decoder
-        )) {
-          if (filterCallback(entry.v, value)) {
-            result.add(entry);
-            found = true;
-          } else if (found === true) {
-            found = false;
-          }
-          if (found === false) {
-            await reader.cancel();
-            break finder;
-          }
-        }
-
-        // if result is empty before walk next index, no there more
-        if (!result.size) break;
-      } catch {
-        break finder;
+        stream = await repository.openFileStream(indexPathEntry);
+      } catch (error) {
+        if (isNotFoundError(error)) break finder;
+        throw error;
       }
+      const reader = stream.getReader();
+      const decoder = new TextDecoder();
+
+      for await (const entry of readJsonlStream<PrefixIndexLine>(reader, decoder)) {
+        if (filterCallback(entry.v, value)) {
+          result.add(entry);
+          found = true;
+        } else if (found === true) {
+          found = false;
+        }
+        if (found === false) {
+          await reader.cancel();
+          break finder;
+        }
+      }
+
+      // if result is empty before walk next index, no there more
+      if (!result.size) break;
     }
 
     return this.flatPrefixIndexLine([...result]);
@@ -238,7 +249,7 @@ export class PrefixTreeWalker implements IIndexReader {
     value: string
   ): Promise<PrefixIndexLine[]> {
     const indexPath = this.getIndexPath(sourceName, field, value);
-    // exists cannot distinguish missing files from some backend failures (#58).
+    // exists returns false only for confirmed absence; other failures reject.
     if (!indexPath || !(await this.repository.exists(indexPath))) return [];
 
     const matched: PrefixIndexLine[] = [];
@@ -275,6 +286,7 @@ export class PrefixTreeWalker implements IIndexReader {
    * Get the first index of the specified directory.
    */
   private async findFirstIndexPath(dir: string): Promise<string> {
+    if (await this.repository.exists(toI(dir))) return toI(dir);
     const prefixIndexPath = toP(dir);
     let prefix: string;
 
@@ -285,10 +297,12 @@ export class PrefixTreeWalker implements IIndexReader {
       const reader = stream.getReader();
       const decoder = new TextDecoder();
 
-      const { value } = await readListStream(reader, decoder).next();
+      const { value, done } = await readListStream(reader, decoder).next();
+      if (done) return toI(dir);
       prefix = value;
-    } catch {
-      return toI(dir);
+    } catch (error) {
+      if (isNotFoundError(error)) return toI(dir);
+      throw error;
     }
 
     return this.findFirstIndexPath(joinPath(dir, prefix));
@@ -299,7 +313,7 @@ export class PrefixTreeWalker implements IIndexReader {
    */
   private async findLastIndexPath(dir: string): Promise<string> {
     const prefixIndexPath = toP(dir);
-    let prefix: string = "";
+    let prefix: string | undefined;
 
     let stream: ReadableStream;
     try {
@@ -309,10 +323,12 @@ export class PrefixTreeWalker implements IIndexReader {
       const decoder = new TextDecoder();
 
       for await (prefix of readListStream(reader, decoder));
-    } catch {
-      return toI(dir);
+    } catch (error) {
+      if (isNotFoundError(error)) return toI(dir);
+      throw error;
     }
 
+    if (prefix === undefined) return toI(dir);
     return this.findLastIndexPath(joinPath(dir, prefix));
   }
 
@@ -320,69 +336,46 @@ export class PrefixTreeWalker implements IIndexReader {
    * Indexes are scanned downward from the specified index directory.
    */
   async *walkPrefixIndexesDownword(
-    indexParentDir: string
+    indexParentDir: string,
+    rootDir: string
   ): AsyncGenerator<string> {
     const repository = this.repository;
-
-    // if a path to an index is specified for the first time,
-    // disable access to indexes located after it.
-    let visitable = false;
-
-    const walk = async function* (
-      dir: string,
-      visited: Set<string> = new Set()
-    ): AsyncGenerator<string> {
-      if (!visited.has(toP(dir))) {
-        try {
-          const stream = await repository.openFileStream(toP(dir));
-          const reader = stream.getReader();
-          const decoder = new TextDecoder();
-
-          // record visits that prefixes path
-          visited.add(toP(dir));
-
-          // record visits that include index directories
-          visited.add(dir);
-
-          for await (let prefix of readListStream(reader, decoder)) {
-            if (!visitable && visited.has(joinPath(dir, prefix))) {
-              visitable = true;
-            }
-
-            if (visitable) {
-              yield* walk(joinPath(dir, prefix), visited);
-            }
-          }
-        } catch {
-          // record visits that include index directories
-          visited.add(dir);
-        }
+    const readPrefixes = async function* (dir: string): AsyncGenerator<string> {
+      let stream: ReadableStream;
+      try {
+        stream = await repository.openFileStream(toP(dir));
+      } catch (error) {
+        if (isNotFoundError(error)) return;
+        throw error;
       }
-      if (!visited.has(toI(dir))) {
-        // Use exists() instead of readFile() to avoid downloading
-        // the full file content just for an existence check.
-        if (await repository.exists(toI(dir))) {
-          yield toI(dir);
-          visited.add(toI(dir));
-        }
-        visited.add(dir);
-      }
+      yield* readListStream(stream.getReader(), new TextDecoder());
+    };
 
-      if (!visited.has(tail(dir).base)) {
-        // reset when ascending a hierarchy to enable skipping in that hierarchy
-        visitable = false;
-
-        yield* walk(tail(dir).base, visited);
+    const subtree = async function* (dir: string): AsyncGenerator<string> {
+      if (await repository.exists(toI(dir))) yield toI(dir);
+      for await (const prefix of readPrefixes(dir)) {
+        yield* subtree(joinPath(dir, prefix));
       }
     };
 
-    yield* walk(indexParentDir, new Set());
+    let dir = trimSlash(indexParentDir);
+    const root = trimSlash(rootDir);
+    yield* subtree(dir);
+    while (dir !== root) {
+      const { base: parent, tail: child } = tail(dir);
+      let afterChild = false;
+      for await (const prefix of readPrefixes(parent)) {
+        if (afterChild) yield* subtree(joinPath(parent, prefix));
+        if (prefix === child) afterChild = true;
+      }
+      dir = parent;
+    }
   }
 
   /**
    * Indexes are scanned upward from the specified index directory.
    */
-  async *walkPrefixIndexesUpword(indexParentDir: string) {
+  async *walkPrefixIndexesUpword(indexParentDir: string, rootDir: string) {
     const repository = this.repository;
 
     // if a path to an index is specified for the first time,
@@ -416,7 +409,8 @@ export class PrefixTreeWalker implements IIndexReader {
               yield* walk(joinPath(dir, prefix), visited);
             }
           }
-        } catch {
+        } catch (error) {
+          if (!isNotFoundError(error)) throw error;
           // record visits that include index directories
           visited.add(dir);
         }
@@ -430,7 +424,7 @@ export class PrefixTreeWalker implements IIndexReader {
         visited.add(dir);
       }
 
-      if (!visited.has(tail(dir).base)) {
+      if (trimSlash(dir) !== trimSlash(rootDir) && !visited.has(tail(dir).base)) {
         // reset when ascending a hierarchy to enable skipping in that hierarchy
         visitable = false;
 
@@ -438,7 +432,7 @@ export class PrefixTreeWalker implements IIndexReader {
       }
     };
 
-    yield* walk(indexParentDir, new Set());
+    yield* walk(trimSlash(indexParentDir), new Set());
   }
 
   /**

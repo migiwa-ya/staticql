@@ -1,9 +1,13 @@
 import { promises as fs } from "fs";
-import { createReadStream } from "node:fs";
 import * as path from "path";
 import { StorageRepository } from "./StorageRepository.js";
 import { Readable } from "node:stream";
-import { joinPath } from "../utils/path.js";
+import { NotFoundError } from "./errors.js";
+
+function isAbsent(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error &&
+    (error.code === "ENOENT" || error.code === "ENOTDIR");
+}
 
 /**
  * FsRepository: StorageRepository implementation for the local file system.
@@ -19,7 +23,8 @@ export class FsRepository implements StorageRepository {
    * Checks whether a file or directory exists.
    *
    * @param filePath - Relative path from baseDir.
-   * @returns `true` if the file exists, otherwise `false`.
+   * @returns `true` if the file exists, `false` for ENOENT or ENOTDIR.
+   * @throws On other access failures.
    */
   async exists(filePath: string): Promise<boolean> {
     const abs = path.resolve(this.baseDir, filePath);
@@ -27,8 +32,9 @@ export class FsRepository implements StorageRepository {
     try {
       await fs.access(abs);
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      if (isAbsent(error)) return false;
+      throw error;
     }
   }
 
@@ -40,19 +46,29 @@ export class FsRepository implements StorageRepository {
    */
   async readFile(filePath: string): Promise<string> {
     const abs = path.resolve(this.baseDir, filePath);
-    return await fs.readFile(abs, "utf-8");
+    try {
+      return await fs.readFile(abs, "utf-8");
+    } catch (error) {
+      if (isAbsent(error)) throw new NotFoundError(filePath, { cause: error });
+      throw error;
+    }
   }
 
-  /*
+  /**
    * Opens a file as a ReadableStream.
    *
    * @param path - Relative path to the file (from the repository base directory)
    * @returns Promise that resolves to a ReadableStream for the file contents
    */
-  async openFileStream(path: string): Promise<ReadableStream> {
-    const fullPath = joinPath(this.baseDir, path);
-    const stream = createReadStream(fullPath);
-    return Readable.toWeb(stream) as ReadableStream;
+  async openFileStream(filePath: string): Promise<ReadableStream> {
+    const abs = path.resolve(this.baseDir, filePath);
+    try {
+      const handle = await fs.open(abs, "r");
+      return Readable.toWeb(handle.createReadStream()) as ReadableStream;
+    } catch (error) {
+      if (isAbsent(error)) throw new NotFoundError(filePath, { cause: error });
+      throw error;
+    }
   }
 
   /**
