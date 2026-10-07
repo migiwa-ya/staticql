@@ -30,19 +30,14 @@
       "default": "./dist/src/diff/extractDiff.js"
     },
     "./diff/cli": {
-      "import": "./dist/src/diff/providers/cli.js",
-      "types": "./dist/src/diff/providers/cli.d.ts",
-      "default": "./dist/src/diff/providers/cli.js"
+      "import": "./dist/src/diff/providers/git.js",
+      "types": "./dist/src/diff/providers/git.d.ts",
+      "default": "./dist/src/diff/providers/git.js"
     },
     "./diff/github": {
       "import": "./dist/src/diff/providers/github.js",
       "types": "./dist/src/diff/providers/github.d.ts",
       "default": "./dist/src/diff/providers/github.js"
-    },
-    "./diff/fs": {
-      "import": "./dist/src/diff/providers/fs.js",
-      "types": "./dist/src/diff/providers/fs.d.ts",
-      "default": "./dist/src/diff/providers/fs.js"
     },
     "./repo/cached": {
       "import": "./dist/src/repository/CachedRepository.js",
