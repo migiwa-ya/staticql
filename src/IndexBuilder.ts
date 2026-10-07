@@ -25,6 +25,7 @@ import {
   getPrefixIndexPath,
   isThroughRelation,
   indexSort,
+  compareOrdinal,
 } from "./constants.js";
 
 // Re-export types for backward compatibility
@@ -380,10 +381,10 @@ export class IndexBuilder {
               .join("\n");
 
             if (!raw.length) {
-              this.repository.removeDir(toParent(path));
+              await this.repository.removeDir(toParent(path));
               touched.push(path);
             } else {
-              this.repository.writeFile(path, raw);
+              await this.repository.writeFile(path, raw);
               touched.push(path);
             }
           }
@@ -406,19 +407,19 @@ export class IndexBuilder {
                 existed.add(prefixString);
               }
               const raw = [...existed]
-                .sort((a, b) => a.localeCompare(b))
+                .sort(compareOrdinal)
                 .map((c) => c)
                 .join("\n");
 
-              this.repository.writeFile(path, raw);
+              await this.repository.writeFile(path, raw);
               touched.push(path);
             } else {
               const raw = [...value]
-                .sort((a, b) => a.localeCompare(b))
+                .sort(compareOrdinal)
                 .map((c) => c)
                 .join("\n");
 
-              this.repository.writeFile(path, raw);
+              await this.repository.writeFile(path, raw);
               touched.push(path);
             }
           } else if (status === "D") {
@@ -724,7 +725,7 @@ export class IndexBuilder {
       for (const [dir, items] of reversedMap.entries()) {
         out.set(
           toP(dir),
-          new Set([...items].sort((a, b) => a.localeCompare(b)))
+          new Set([...items].sort(compareOrdinal))
         );
       }
       final.set(status, out);

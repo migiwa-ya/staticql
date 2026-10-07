@@ -13,6 +13,29 @@ beforeAll(async () => {
 });
 
 describe("QueryBuilder where", () => {
+  it("ANDs a later slug condition with other fields (M2)", async () => {
+    const { data } = await staticql.from<HerbsRecord>("herbs")
+      .where("name", "eq", "ゴボウ")
+      .where("slug", "eq", "cymbopogon-citratus")
+      .exec();
+    expect(data).toEqual([]);
+  });
+
+  it("ANDs a leading slug condition with other fields", async () => {
+    const { data } = await staticql.from<HerbsRecord>("herbs")
+      .where("slug", "eq", "arctium-lappa")
+      .where("name", "eq", "ゴボウ")
+      .exec();
+    expect(data.map((record) => record.slug)).toEqual(["arctium-lappa"]);
+  });
+
+  it("resolves hasOneThrough using target source settings", async () => {
+    const { data } = await staticql.from<RecipesRecord>("recipes").join("process").exec();
+    expect(data.length).toBe(2);
+    expect(data.map((recipe) => recipe.process?.slug)).toEqual(["infusion", "infusion"]);
+    expect(data.map((recipe) => recipe.process?.name)).toEqual(["ハーブティー", "ハーブティー"]);
+  });
+
   it("should find herbs by 'eq' match on indexed field", async () => {
     const { data: herbs } = await staticql
       .from<HerbsRecord>("herbs")

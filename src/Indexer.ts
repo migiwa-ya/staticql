@@ -140,6 +140,11 @@ export class Indexer {
     return this.walker.flatPrefixIndexLine(unflattened);
   }
 
+  /** Read the unique file containing an exact value, without tree traversal. */
+  findExactIndexLines(sourceName: string, field: string, value: string) {
+    return this.walker.findExactIndexLines(sourceName, field, value);
+  }
+
   /**
    * Get Prefix Index directories path converted with Unicode.
    */

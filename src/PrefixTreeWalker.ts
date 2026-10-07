@@ -230,6 +230,25 @@ export class PrefixTreeWalker implements IIndexReader {
   }
 
   /**
+   * Read exact values from their unique file, including short parent prefixes.
+   */
+  async findExactIndexLines(
+    sourceName: string,
+    field: string,
+    value: string
+  ): Promise<PrefixIndexLine[]> {
+    const indexPath = this.getIndexPath(sourceName, field, value);
+    // exists cannot distinguish missing files from some backend failures (#58).
+    if (!indexPath || !(await this.repository.exists(indexPath))) return [];
+
+    const matched: PrefixIndexLine[] = [];
+    for await (const line of this.readIndexFileLines(indexPath, false)) {
+      if (line.v === value) matched.push(line);
+    }
+    return this.flatPrefixIndexLine(matched);
+  }
+
+  /**
    * Flatten PrefixIndexLine array by ref keys.
    */
   flatPrefixIndexLine(unflattened: PrefixIndexLine[]) {
