@@ -111,6 +111,123 @@ describe("parseYAML", () => {
   });
 
   describe("comments and blank lines", () => {
+    test("M1: inline annotations do not become part of an ID", () => {
+      const rawContent = [
+        "requires:",
+        "  - to: AXS-SPC-004          # Place Familiarity",
+        "    why: テスト",
+      ].join("\n");
+      expect(parseYAML({ rawContent })).toEqual({
+        requires: [{ to: "AXS-SPC-004", why: "テスト" }],
+      });
+    });
+
+    test("M2: a comment before a list item preserves the array", () => {
+      const rawContent = [
+        "requires:",
+        "  # Place Familiarity",
+        "  - to: AXS-SPC-004",
+        "    why: テスト",
+      ].join("\n");
+      expect(parseYAML({ rawContent })).toEqual({
+        requires: [{ to: "AXS-SPC-004", why: "テスト" }],
+      });
+    });
+
+    test.each([
+      ["mapping string", "key: value # c", { key: "value" }],
+      ["number", "count: 1 # c", { count: 1 }],
+      ["boolean", "active: true # c", { active: true }],
+      ["inline array", "tags: [a, b] # c", { tags: ["a", "b"] }],
+      ["scalar list", "items:\n  - a # c", { items: ["a"] }],
+      ["colon in list comment", "items:\n  - a # note: x", { items: ["a"] }],
+      ["root scalar list", "- a # c", ["a"]],
+      ["root object list", "- key: v # c", [{ key: "v" }]],
+      ["tab before comment", "a: v\t# c", { a: "v" }],
+      ["comment-only value", "color: #fff", { color: undefined }],
+      ["quote inside plain value", 's: hello, "world # note', { s: 'hello, "world' }],
+      ["apostrophe inside plain value", "s: it's # c", { s: "it's" }],
+      ["flow continuation comment", "tags: [a, # c\n  b]", { tags: ["a", "b"] }],
+      ["plain flow continuation", 'tags: [a\n  "b # c\n  d]', { tags: ['a "b d'] }],
+      ["tab before quoted value", 'a:\t"x # y" # c', { a: '"x # y"' }],
+      ["no space before quoted value", 'a:"x # y" # c', { a: '"x # y"' }],
+      ["tab before list value", '- a:\t"x # y" # c', [{ a: '"x # y"' }]],
+    ])("removes inline comments: %s", (_name, rawContent, expected) => {
+      expect(parseYAML({ rawContent: rawContent as string })).toEqual(expected);
+    });
+
+    test.each([
+      ["double quotes", 'a: "x # y"', { a: '"x # y"' }],
+      ["single quotes and trailing comment", "b: 'p # q' # r", { b: "'p # q'" }],
+      ["hash without preceding space", "a: a#b", { a: "a#b" }],
+      ["URL fragment", "url: http://x/#frag", { url: "http://x/#frag" }],
+      ["escaped double quote", String.raw`a: "x\" # y"`, { a: String.raw`"x\" # y"` }],
+      ["even backslashes close quote", String.raw`a: "x\\" # y`, { a: String.raw`"x\\"` }],
+      ["escaped single quote", "a: 'it''s # y'", { a: "'it''s # y'" }],
+      ["quoted comment-like continuation", 'tags: ["a\n  # b\n  c"]', { tags: ["a # b c"] }],
+      ["quoted inline continuation", 'tags: ["a\n  b # c"]', { tags: ["a b # c"] }],
+      ["tab after colon", 'a:\t"x # y"', { a: '"x # y"' }],
+      ["no whitespace after colon", 'a:"x # y"', { a: '"x # y"' }],
+      ["tab after list key", '- a:\t"x # y"', [{ a: '"x # y"' }]],
+      ["new quoted flow element", 'tags: [a,\n  "b # c"]', { tags: ["a", "b # c"] }],
+      ["after plain array", 'tags: [a]\nlabel: "x # y"', { tags: ["a"], label: '"x # y"' }],
+      ["after plain array with comment", 'tags: [a]\nlabel: "x # y" # c', { tags: ["a"], label: '"x # y"' }],
+      ["after quoted array", 'tags: ["a"]\nlabel: "x # y"', { tags: ["a"], label: '"x # y"' }],
+      ["after quoted array with comment", 'tags: ["a"]\nlabel: "x # y" # c', { tags: ["a"], label: '"x # y"' }],
+      ["after nested array", 'tags: [[a], b]\nlabel: "x # y" # c', { tags: ["[a]", "b"], label: '"x # y"' }],
+    ])("preserves literal hashes: %s", (_name, rawContent, expected) => {
+      expect(parseYAML({ rawContent: rawContent as string })).toEqual(expected);
+    });
+
+    test.each([
+      {
+        name: "before an object list",
+        withComments: "requires:\n  # c\n  - to: AXS-SPC-004\n    why: テスト",
+        withoutComments: "requires:\n  - to: AXS-SPC-004\n    why: テスト",
+        expected: { requires: [{ to: "AXS-SPC-004", why: "テスト" }] },
+      },
+      {
+        name: "between list items and keys",
+        withComments: "items:\n  - name: A\n    # key comment\n    value: 1\n  # item comment\n  - name: B\n    value: 2",
+        withoutComments: "items:\n  - name: A\n    value: 1\n  - name: B\n    value: 2",
+        expected: { items: [{ name: "A", value: 1 }, { name: "B", value: 2 }] },
+      },
+      {
+        name: "deeply nested list",
+        withComments: "parent:\n  # c\n  child:\n    # c\n    items:\n      # c\n      - name: A\n        # c\n        value: 1",
+        withoutComments: "parent:\n  child:\n    items:\n      - name: A\n        value: 1",
+        expected: { parent: { child: { items: [{ name: "A", value: 1 }] } } },
+      },
+      {
+        name: "root list",
+        withComments: "# c\n- name: A\n# c\n- name: B\n# c",
+        withoutComments: "- name: A\n- name: B",
+        expected: [{ name: "A" }, { name: "B" }],
+      },
+      {
+        name: "multiline inline array",
+        withComments: "tags: [a,\n  # c\n  b]\n# c\nname: foo",
+        withoutComments: "tags: [a,\n  b]\nname: foo",
+        expected: { tags: ["a", "b"], name: "foo" },
+      },
+      {
+        name: "inline array starting on the next line",
+        withComments: "tags:\n  # c\n  [a,\n  # c\n  b]",
+        withoutComments: "tags:\n  [a,\n  b]",
+        expected: { tags: ["a", "b"] },
+      },
+    ])("comment lines preserve structure: $name", ({ withComments, withoutComments, expected }) => {
+      const result = parseYAML({ rawContent: withComments });
+      expect(result).toEqual(parseYAML({ rawContent: withoutComments }));
+      expect(result).toEqual(expected);
+    });
+
+    test("preserves indentation on whitespace-only lines", () => {
+      expect(parseYAML({ rawContent: "items:\n  \n  - first" })).toEqual({
+        items: ["first"],
+      });
+    });
+
     test("lines starting with # are ignored", () => {
       const rawContent = [
         "# this is a comment",

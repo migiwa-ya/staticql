@@ -1,15 +1,96 @@
+function stripComments(lines: string[]): string[] {
+  const result: string[] = [];
+  let flowDepth = 0;
+  let quote: '"' | "'" | null = null;
+  let flowItem: "start" | "scalar" = "start";
+
+  for (const line of lines) {
+    if (quote === null && line.trim().startsWith("#")) continue;
+
+    let output = line;
+    let scalarStart = true;
+    let colonSeen = false;
+
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (quote !== null) {
+        if (char === quote) {
+          if (quote === "'" && line[i + 1] === "'") {
+            i++;
+            continue;
+          }
+          let backslashes = 0;
+          if (quote === '"') {
+            for (let j = i - 1; j >= 0 && line[j] === "\\"; j--) {
+              backslashes++;
+            }
+          }
+          if (backslashes % 2 === 0) {
+            quote = null;
+            if (flowDepth > 0) flowItem = "scalar";
+          }
+        }
+        continue;
+      }
+
+      if (char === "#" && /[ \t]/.test(line[i - 1] ?? "")) {
+        output = line.slice(0, i).trimEnd();
+        break;
+      }
+      if (char === " " || char === "\t") continue;
+
+      if (flowDepth > 0) {
+        if (char === ",") {
+          flowItem = "start";
+        } else if (char === "]") {
+          flowDepth--;
+          flowItem = "scalar";
+          scalarStart = false;
+          if (flowDepth === 0) colonSeen = true;
+        } else if (char === "[" && flowItem === "start") {
+          flowDepth++;
+        } else if ((char === '"' || char === "'") && flowItem === "start") {
+          quote = char;
+        } else {
+          flowItem = "scalar";
+        }
+        continue;
+      }
+
+      if (char === ":" && !colonSeen) {
+        colonSeen = true;
+        scalarStart = true;
+      } else if (scalarStart && char === "-" && line[i + 1] === " ") {
+        i++;
+      } else if (scalarStart && char === "[") {
+        flowDepth = 1;
+        flowItem = "start";
+        scalarStart = false;
+      } else {
+        if (scalarStart && (char === '"' || char === "'")) quote = char;
+        scalarStart = false;
+      }
+    }
+
+    if (flowDepth === 0) quote = null;
+    result.push(output);
+  }
+  return result;
+}
+
 /**
  * parseYAML: A minimal YAML parser based on indentation.
  *
  * - Supports nested objects and arrays.
  * - Handles inline arrays (`[a, b, c]`), multi-line arrays, booleans, numbers, and ISO date strings.
+ * - Full-line comments and inline comments (` #` outside quotes) are ignored.
  * - Does not support advanced YAML features (anchors, multi-docs, etc.).
  *
  * @param rawContent - Raw YAML string content.
  * @returns Parsed JavaScript object or array.
  */
 export function parseYAML({ rawContent }: { rawContent: string }): any {
-  const lines = rawContent.replace(/\r\n/g, "\n").split("\n");
+  const lines = stripComments(rawContent.replace(/\r\n/g, "\n").split("\n"));
   let idx = 0;
 
   // Skip initial blank lines or comments
