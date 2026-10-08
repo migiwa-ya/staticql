@@ -51,6 +51,12 @@ describe("getPrefixIndexPath", () => {
   test("Unicode character 'あ' (U+3042) returns 3042", () => {
     expect(getPrefixIndexPath("あ", 1)).toBe("3042");
   });
+
+  test("counts non-BMP characters as two UTF-16 code units", () => {
+    expect(getPrefixIndexPath("😀", 1)).toBe("d83d");
+    expect(getPrefixIndexPath("😀", 2)).toBe("d83d/de00");
+    expect(getPrefixIndexPath("😀a", 3)).toBe("d83d/de00/0061");
+  });
 });
 
 describe("isThroughRelation", () => {

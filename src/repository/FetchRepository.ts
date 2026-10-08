@@ -2,7 +2,7 @@ import { SourceConfigResolver as Resolver } from "../SourceConfigResolver.js";
 import { parsePrefixDict } from "../utils/normalize.js";
 import { joinPath, toI, toP } from "../utils/path.js";
 import type { StorageRepository } from "./StorageRepository.js";
-import { NotFoundError } from "./errors.js";
+import { isNotFoundError, NotFoundError } from "./errors.js";
 
 /**
  * FetchRepository: A browser-compatible StorageRepository implementation.
@@ -133,7 +133,8 @@ export class FetchRepository implements StorageRepository {
    * Internal helper to fetch a JSON index file (typically a list of slugs).
    *
    * @param indexPath - Relative or absolute path to index file.
-   * @returns Parsed slug list or empty array on failure.
+   * @returns Parsed slug list.
+   * @throws If the fetch fails or the response is not OK.
    */
   private async fetchIndexFile(indexPath: string): Promise<string[]> {
     const url = indexPath.startsWith("/")
@@ -141,7 +142,7 @@ export class FetchRepository implements StorageRepository {
       : this.baseUrl + indexPath;
 
     const res = await fetch(url);
-    if (!res.ok) return [];
+    this.checkResponse(res, indexPath, url);
     return await res.json();
   }
 
@@ -176,35 +177,47 @@ export class FetchRepository implements StorageRepository {
   private async readAllIndexesRemote(dir: string): Promise<any[]> {
     const results = [];
 
+    const indexPath = toI(dir);
+    const indexUrl = toI(this.baseUrl, dir);
+    const indexRes = await fetch(indexUrl);
+    let indexExists = true;
     try {
-      const indexUrl = toI(this.baseUrl, dir);
-      const indexRes = await fetch(indexUrl);
-      if (indexRes.ok) {
-        const indexData = await indexRes.text();
-        const flattened = this.flatPrefixIndexLine(
-          indexData
-            .split("\n")
-            .map((line) => line.trim())
-            .filter(Boolean)
-            .map((line) => JSON.parse(line))
-        );
-        results.push(...flattened);
-      }
-    } catch {}
+      this.checkResponse(indexRes, indexPath, indexUrl);
+    } catch (error) {
+      if (!isNotFoundError(error)) throw error;
+      indexExists = false;
+    }
+    if (indexExists) {
+      const indexData = await indexRes.text();
+      const flattened = this.flatPrefixIndexLine(
+        indexData
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => JSON.parse(line))
+      );
+      results.push(...flattened);
+    }
 
+    const prefixesPath = toP(dir);
+    const prefixesUrl = toP(this.baseUrl, dir);
+    const prefixesRes = await fetch(prefixesUrl);
+    let prefixesExist = true;
     try {
-      const prefixesUrl = toP(this.baseUrl, dir);
-      const prefixesRes = await fetch(prefixesUrl);
-      if (prefixesRes.ok) {
-        const prefixesData = await prefixesRes.text();
-        const prefixes = parsePrefixDict(prefixesData);
-        for (const prefix of prefixes) {
-          const subdir = joinPath(dir, prefix);
-          const subResults = await this.readAllIndexesRemote(subdir);
-          results.push(...subResults);
-        }
+      this.checkResponse(prefixesRes, prefixesPath, prefixesUrl);
+    } catch (error) {
+      if (!isNotFoundError(error)) throw error;
+      prefixesExist = false;
+    }
+    if (prefixesExist) {
+      const prefixesData = await prefixesRes.text();
+      const prefixes = parsePrefixDict(prefixesData);
+      for (const prefix of prefixes) {
+        const subdir = joinPath(dir, prefix);
+        const subResults = await this.readAllIndexesRemote(subdir);
+        results.push(...subResults);
       }
-    } catch {}
+    }
 
     return results;
   }

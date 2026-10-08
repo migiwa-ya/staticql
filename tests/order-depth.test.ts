@@ -10,7 +10,7 @@ import { StorageRepository } from "../src/repository/StorageRepository.js";
 import { SourceRecord } from "../src/types.js";
 import { PrefixIndexDepth } from "../src/utils/typs.js";
 import { decodeCursor } from "../src/utils/pagenation.js";
-import { getPrefixIndexPath } from "../src/constants.js";
+import { compareOrdinal, getPrefixIndexPath } from "../src/constants.js";
 
 type Item = SourceRecord & { name: string; group: string };
 const values = ["a", "ab", "ac", "b", "ba", "B", "Ab"];
@@ -70,6 +70,22 @@ function r2FromFixture(): StorageRepository {
 }
 
 describe("orderBy across index depths (#55)", () => {
+  it.each(depths)("orders non-BMP values and preserves emoji filters at depth %s", async (depth) => {
+    const names = ["😀a", "😁", "😀", "a", "あ"];
+    const sq = await fixture(depth, names);
+    const ascending = [...names].sort(compareOrdinal);
+
+    for (const direction of directions) {
+      const expected = direction === "asc" ? ascending : [...ascending].reverse();
+      const query = () => sq.from<Item, string>("p").orderBy("name", direction).pageSize(100);
+      expect((await query().exec()).data.map((item) => item.name)).toEqual(expected);
+      expect((await query().where("name", "eq", "😀").exec()).data.map((item) => item.name))
+        .toEqual(["😀"]);
+      expect((await query().where("name", "startsWith", "😀").exec()).data.map((item) => item.name))
+        .toEqual(expected.filter((name) => name.startsWith("😀")));
+    }
+  });
+
   it.each(depths)("orders full and filtered results at depth %s", async (depth) => {
     const sq = await fixture(depth);
     for (const direction of directions) {

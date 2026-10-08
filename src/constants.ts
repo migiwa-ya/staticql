@@ -16,12 +16,18 @@ export function getIndexDir(sourceName: string, field: string): string {
 }
 
 /**
- * Get Prefix Index directories path converted with Unicode.
+ * Get the prefix index path from the first `depth` UTF-16 code units.
+ * This matches compareOrdinal and the prefix tree traversal order. A
+ * non-BMP character occupies two code units, so changing this path format
+ * requires regenerating indexes that contain non-BMP values.
  */
 export function getPrefixIndexPath(value: string, depth: number): string {
-  const codes = [...value]
-    .slice(0, depth)
-    .map((char) => char.charCodeAt(0).toString(16).padStart(4, "0"));
+  const units = typeof value === "string"
+    ? value.slice(0, depth).split("")
+    : [...(value as unknown as Iterable<string>)].slice(0, depth);
+  const codes = units.map((char) =>
+    char.charCodeAt(0).toString(16).padStart(4, "0")
+  );
 
   return joinPath(...codes);
 }
