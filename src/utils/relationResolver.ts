@@ -72,33 +72,20 @@ export function resolveDirectRelation(
 ): SourceRecord | SourceRecord[] | null {
   const foreignMap =
     foreignMapOpt ?? buildForeignKeyMap(foreignData, rel.foreignKey);
-  const relType = rel.type;
   const localKeys = resolveField(row, rel.localKey).flat();
 
-  let matches: SourceRecord[] = [];
-  if (relType === "hasOne" || relType === "hasMany") {
-    const seen = new Set<SourceRecord>();
-    for (const k of localKeys) {
-      for (const target of foreignMap.get(k) ?? []) {
-        if (!seen.has(target)) {
-          seen.add(target);
-          matches.push(target);
-        }
+  const seen = new Set<SourceRecord>();
+  const matches: SourceRecord[] = [];
+  for (const key of localKeys) {
+    for (const target of foreignMap.get(key) ?? []) {
+      if (!seen.has(target)) {
+        seen.add(target);
+        matches.push(target);
       }
     }
-  } else if (localKeys.length === 1) {
-    for (const k of localKeys) {
-      const arr = foreignMap.get(k);
-      if (arr) matches.push(...arr);
-    }
-  } else {
-    matches = localKeys
-      .map((k) => findEntriesByPartialKey(foreignMap, k))
-      .flat()
-      .flat();
   }
 
-  if (relType === "hasOne") {
+  if (rel.type === "hasOne") {
     return matches.length > 0 ? matches[0] : null;
   } else {
     return matches;

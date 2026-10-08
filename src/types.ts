@@ -50,6 +50,7 @@ export type DiffEntry = {
   source: string;
   slug: string;
   fields?: Record<string, unknown>;
+  oldFields?: Record<string, unknown>;
 };
 
 /**

@@ -12,6 +12,7 @@ type JoinedRecord = SourceRecord & {
   bySlug: SourceRecord[];
   byId: SourceRecord[];
   oneById: SourceRecord | null;
+  inverse: SourceRecord[];
 };
 
 let root: string;
@@ -37,6 +38,13 @@ function writeRecords(source: string, records: FixtureRecord[]) {
     );
     fs.writeFileSync(path.join(dir, `${record.slug}.md`), `---\n${fields.join("\n")}\n---\n`);
   }
+}
+
+function writeRecord(source: string, record: FixtureRecord) {
+  const fields = Object.entries(record).map(([key, value]) =>
+    `${key}: ${Array.isArray(value) ? JSON.stringify(value) : value}`
+  );
+  fs.writeFileSync(path.join(root, source, `${record.slug}.md`), `---\n${fields.join("\n")}\n---\n`);
 }
 
 async function createFixture(
@@ -183,18 +191,34 @@ describe("direct relations (#42)", () => {
   );
 
   it.each(["belongsTo", "belongsToMany"] as const)(
-    "preserves %s partial matching in generated indexes until #67 (E1)",
+    "matches %s index results to exact join results in full and incremental builds (#67/C4)",
     async (type) => {
-      // #67 tracks this existing behavior; #42 only changes hasOne/hasMany.
       const staticql = await createFixture(
         boundaryRows, boundaryTargets,
         { inverse: relation(type, "slug"), bySlug: relation("hasMany", "slug") },
         { "inverse.name": {}, "bySlug.name": {} }
       );
-      const inverse = await query(staticql).where("inverse.name", "eq", "ab").exec();
-      const direct = await query(staticql).where("bySlug.name", "eq", "ab").exec();
-      expect(slugs(inverse.data)).toEqual(["both", "two"]);
-      expect(slugs(direct.data)).toEqual(["both"]);
+
+      const assertMatchesJoin = async () => {
+        const joined = await query(staticql).join("inverse").exec();
+        for (const value of ["a", "ab", "z"]) {
+          const expected = slugs(joined.data.filter((row) =>
+            row.inverse.some((target) => target.name === value)
+          ));
+          const indexed = await query(staticql).where("inverse.name", "eq", value).exec();
+          expect(slugs(indexed.data)).toEqual(expected);
+        }
+      };
+      await assertMatchesJoin();
+
+      const changed = { slug: "two", name: "two", rel: ["ab", "z"] };
+      writeRecord("rows", changed);
+      await staticql.getIndexer().updateIndexesForFiles([{
+        status: "M", source: "rows", slug: "two",
+        oldFields: { slug: "two", name: ["two"], rel: ["a", "z"] },
+        fields: { slug: "two", name: ["two"], rel: ["ab", "z"] },
+      }]);
+      await assertMatchesJoin();
     }
   );
 });
