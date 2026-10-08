@@ -121,6 +121,152 @@ export class IndexBuilder {
    * @param diffEntries - List of file change entries.
    */
   async updateIndexesForFiles(diffEntries: DiffEntry[]): Promise<string[]> {
+    const originalEntries = [...diffEntries];
+    const allSourceConfigs = this.resolver.resolveAll();
+    const affectedSlugs = new Map<string, Set<string>>();
+    const throughRecordsBySource = new Map<string, Promise<SourceRecord[]>>();
+    const sourceSlugsByName = new Map<string, Promise<Set<string>>>();
+    const uniqueValues = (values: unknown[]): string[] =>
+      [...new Set(
+        values.flat(Infinity).filter((value) => value != null).map(String)
+      )];
+    const entryValues = (entry: DiffEntry, field: string): string[] => {
+      if (field === "slug") return [entry.slug];
+      const values = [entry.fields?.[field]];
+      if (entry.status === "M") values.push(entry.oldFields?.[field]);
+      return uniqueValues(values);
+    };
+    const addAffectedSlugs = (source: string, slugs: string[]) => {
+      if (!affectedSlugs.has(source)) affectedSlugs.set(source, new Set());
+      for (const slug of slugs) affectedSlugs.get(source)!.add(slug);
+    };
+    const findReferencingSlugs = async (
+      source: string,
+      localKey: string,
+      keys: string[]
+    ): Promise<string[]> => {
+      if (localKey === "slug") {
+        if (!sourceSlugsByName.has(source)) {
+          sourceSlugsByName.set(
+            source,
+            this.sourceLoader.loadBySourceName(source).then(
+              (records) => new Set(records.map((record) => record.slug))
+            )
+          );
+        }
+        const currentSlugs = await sourceSlugsByName.get(source)!;
+        return keys.filter((slug) => currentSlugs.has(slug));
+      }
+      const lines = await Promise.all(
+        keys.map((key) => this.reader.findIndexLines(source, localKey, key))
+      );
+      return [...new Set(
+        lines.flatMap((result) =>
+          (result ?? []).flatMap((line) => Object.keys(line.ref))
+        )
+      )];
+    };
+
+    // Only original modifications and deletions can invalidate existing
+    // relations. Additions deliberately remain outside this propagation.
+    for (const entry of originalEntries) {
+      if (entry.status !== "M" && entry.status !== "D") continue;
+
+      for (const sourceRsc of allSourceConfigs) {
+        for (const rel of Object.values(sourceRsc.relations ?? {})) {
+          if (isThroughRelation(rel)) {
+            if (rel.through === entry.source) {
+              const keys = entryValues(entry, rel.throughForeignKey);
+              addAffectedSlugs(
+                sourceRsc.name,
+                await findReferencingSlugs(
+                  sourceRsc.name,
+                  rel.sourceLocalKey,
+                  keys
+                )
+              );
+            }
+
+            if (rel.to === entry.source) {
+              const targetKeys = new Set(entryValues(entry, rel.targetForeignKey));
+              if (targetKeys.size) {
+                // throughLocalKey has no guaranteed generated index. Scan the
+                // current through records; changed/deleted through records are
+                // separately covered by the through-source branch above.
+                if (!throughRecordsBySource.has(rel.through)) {
+                  throughRecordsBySource.set(
+                    rel.through,
+                    this.sourceLoader.loadBySourceName(rel.through)
+                  );
+                }
+                const throughRecords = await throughRecordsBySource.get(rel.through)!;
+                const throughKeys = uniqueValues(
+                  throughRecords
+                    .filter((record) =>
+                      resolveField(record, rel.throughLocalKey).some((key) =>
+                        targetKeys.has(key)
+                      )
+                    )
+                    .map((record) => resolveField(record, rel.throughForeignKey))
+                );
+                addAffectedSlugs(
+                  sourceRsc.name,
+                  await findReferencingSlugs(
+                    sourceRsc.name,
+                    rel.sourceLocalKey,
+                    throughKeys
+                  )
+                );
+              }
+            }
+          } else if (rel.to === entry.source) {
+            const keys = entryValues(entry, rel.foreignKey);
+            addAffectedSlugs(
+              sourceRsc.name,
+              await findReferencingSlugs(sourceRsc.name, rel.localKey, keys)
+            );
+          }
+        }
+      }
+    }
+
+    const originalSlugsBySource = new Map<string, Set<string>>();
+    for (const entry of originalEntries) {
+      if (!originalSlugsBySource.has(entry.source)) {
+        originalSlugsBySource.set(entry.source, new Set());
+      }
+      originalSlugsBySource.get(entry.source)!.add(entry.slug);
+    }
+
+    const propagatedEntries: DiffEntry[] = [];
+    for (const [source, candidateSlugs] of affectedSlugs) {
+      const alreadyChanged = originalSlugsBySource.get(source) ??
+        new Set<string>();
+      const records = await this.sourceLoader.loadBySlugs(
+        source,
+        [...candidateSlugs].filter((slug) => !alreadyChanged.has(slug))
+      );
+      const rsc = this.resolver.resolveOne(source);
+      for (const record of records) {
+        const fields: Record<string, unknown> = {};
+        for (const field of Object.keys(rsc.indexes ?? {})) {
+          const customIndexer = this.customIndexers[`${rsc.name}.${field}`];
+          fields[field] = customIndexer
+            ? customIndexer(record)
+            : resolveField(record, field);
+        }
+        fields.slug = record.slug;
+        propagatedEntries.push({
+          status: "M",
+          source,
+          slug: record.slug,
+          fields,
+          oldFields: { ...fields },
+        });
+      }
+    }
+
+    diffEntries = [...originalEntries, ...propagatedEntries];
     const entryGroup: EntryGroup = new Map();
     const touched: string[] = [];
 
