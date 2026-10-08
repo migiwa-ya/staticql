@@ -55,6 +55,13 @@ function entry(status: DiffLine["status"], slug: string, title: string) {
   return { status, source: "pages", slug, fields: { title: [title], slug } };
 }
 
+function modifiedEntry(slug: string, title: string, oldTitle: string) {
+  return {
+    ...entry("M", slug, title),
+    oldFields: { title: [oldTitle], slug },
+  };
+}
+
 function markdown(slug: string, title: string) {
   return `---\nslug: ${slug}\ntitle: ${title}\n---\nBody`;
 }
@@ -77,7 +84,7 @@ describe("extractDiff slug consistency (#59)", () => {
 
   test("(d) emits one modification when base and head slugs differ", async () => {
     expect(await diff("M", "content/x.md", "content/*.md", "markdown", markdown("new", "B"), markdown("old", "A")))
-      .toEqual([entry("M", "x", "B")]);
+      .toEqual([modifiedEntry("x", "B", "A")]);
   });
 
   test("(e) overrides the slug of a single YAML object", async () => {
@@ -99,7 +106,7 @@ describe("extractDiff slug consistency (#59)", () => {
     expect(await diff("M", "data/list.yaml", "data/*.yaml", "yaml",
       "- slug: a\n  title: A2\n- slug: b\n  title: B",
       "- slug: a\n  title: A\n- slug: b\n  title: B"))
-      .toEqual([entry("M", "a", "A2")]);
+      .toEqual([modifiedEntry("a", "A2", "A")]);
   });
 
   test("(i) emits nothing when only the explicit Markdown slug changes", async () => {

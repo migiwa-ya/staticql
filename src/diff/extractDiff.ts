@@ -115,18 +115,26 @@ export async function extractDiff(opts: ExtractDiffOpts): Promise<DiffEntry[]> {
     oldRec?: any
   ) {
     const fields = buildFields(rec, rsc);
+    const oldFields = oldRec ? buildFields(oldRec, rsc) : undefined;
 
     if (
       status === "M" &&
       oldRec &&
-      JSON.stringify(fields) === JSON.stringify(buildFields(oldRec, rsc))
+      JSON.stringify(fields) === JSON.stringify(oldFields)
     )
       return;
 
     // slug as String for src/Indexer.ts:getStatus
     fields["slug"] = rec.slug;
+    if (oldFields) oldFields["slug"] = rec.slug;
 
-    results.push({ status, source: rsc.name, slug: rec.slug, fields });
+    results.push({
+      status,
+      source: rsc.name,
+      slug: rec.slug,
+      fields,
+      ...(status === "M" && oldFields ? { oldFields } : {}),
+    });
   }
 
   function processModified(

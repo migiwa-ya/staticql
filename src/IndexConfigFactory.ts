@@ -66,8 +66,8 @@ export class IndexConfigFactory {
       allSources
     );
 
-    for (const [_, rel] of relationalSources) {
-      const fieldNames = this.getRelationIndexFields(sourceName, rel);
+    for (const [relationSource, rel] of relationalSources) {
+      const fieldNames = this.getRelationIndexFields(sourceName, relationSource, rel);
 
       for (const fieldName of fieldNames) {
         if (!fieldName) continue;
@@ -110,16 +110,22 @@ export class IndexConfigFactory {
     allSources: Record<string, IndexConfigInput>
   ): [string, Relation][] {
     const fromOtherSources = Object.entries(allSources)
-      .filter(([name]) => name !== sourceName)
-      .flatMap(([_, s]) =>
-        Object.entries(s.relations ?? {}).filter(([_, rel]) =>
-          isThroughRelation(rel)
-            ? rel.to === sourceName || rel.through === sourceName
-            : rel.to === sourceName
-        )
+      .flatMap(([relationSource, s]) =>
+        Object.entries(s.relations ?? {})
+          .filter(([_, rel]) =>
+            isThroughRelation(rel)
+              ? rel.to === sourceName || rel.through === sourceName
+              : rel.to === sourceName
+          )
+          .map(([, rel]) => [relationSource, rel] as [string, Relation])
       );
 
-    return [...fromOtherSources, ...Object.entries(source.relations ?? {})];
+    return [
+      ...fromOtherSources,
+      ...Object.entries(source.relations ?? {}).map(
+        ([, rel]) => [sourceName, rel] as [string, Relation]
+      ),
+    ];
   }
 
   /**
@@ -127,6 +133,7 @@ export class IndexConfigFactory {
    */
   private getRelationIndexFields(
     sourceName: string,
+    relationSource: string,
     rel: Relation
   ): Array<string | null> {
     const fieldNames: Array<string | null> = [];
@@ -139,18 +146,21 @@ export class IndexConfigFactory {
     ) {
       if (rel.to === sourceName) {
         fieldNames.push(rel.foreignKey === "slug" ? null : rel.foreignKey);
-      } else {
+      }
+      if (relationSource === sourceName) {
         fieldNames.push(rel.localKey === "slug" ? null : rel.localKey);
       }
     } else if (
       rel.type === "hasOneThrough" ||
       rel.type === "hasManyThrough"
     ) {
+      if (relationSource === sourceName) {
+        fieldNames.push(rel.sourceLocalKey === "slug" ? null : rel.sourceLocalKey);
+      }
+      if (rel.through === sourceName) {
+        fieldNames.push(rel.throughForeignKey === "slug" ? null : rel.throughForeignKey);
+      }
       if (rel.to === sourceName) {
-        fieldNames.push(
-          rel.throughForeignKey === "slug" ? null : rel.throughForeignKey
-        );
-      } else {
         fieldNames.push(
           rel.targetForeignKey === "slug" ? null : rel.targetForeignKey
         );

@@ -31,10 +31,9 @@ import {
 // Re-export types for backward compatibility
 export type { DiffEntry, DirectRelationMap, ThroughRelationMap } from "./types.js";
 
-// Map<sourceName, Map<status, >>
 type EntryGroup = Map<
   string,
-  Map<DiffEntry["status"], Set<Omit<DiffEntry, "status" | "source">>>
+  Map<"A" | "D", Set<{ slug: string }>>
 >;
 
 // Record<sourceName, {["foreignMap" | "targetMap"]: Map<value, SourceRecord[]>
@@ -106,15 +105,10 @@ export class IndexBuilder {
 
       // Create dictionary of Prefix Indexes (parallel writes)
       const prefixWrites: Promise<void>[] = [];
-      for await (const [_, values] of this.collectPrefixDirs(
-        prefixes,
-        rsc
-      ).entries()) {
-        for (const [path, value] of values) {
-          const raw = [...value].join("\n");
+      for await (const [path, value] of this.collectPrefixDirs(prefixes, rsc)) {
+        const raw = [...value].join("\n");
 
-          prefixWrites.push(this.repository.writeFile(path, raw));
-        }
+        prefixWrites.push(this.repository.writeFile(path, raw));
       }
 
       await Promise.all([...indexWrites, ...prefixWrites]);
@@ -131,12 +125,14 @@ export class IndexBuilder {
     const touched: string[] = [];
 
     for (const entry of diffEntries) {
-      if (entry.status === "A" || entry.status === "D") {
-        if (!entryGroup.has(entry.source))
-          entryGroup.set(entry.source, new Map());
-        const source = entryGroup.get(entry.source);
-        if (!source?.has(entry.status)) source?.set(entry.status, new Set());
-        source?.get(entry.status)?.add({ slug: entry.slug });
+      const statuses: Array<"A" | "D"> = entry.status === "M"
+        ? entry.oldFields ? ["D", "A"] : ["A"]
+        : [entry.status];
+      if (!entryGroup.has(entry.source)) entryGroup.set(entry.source, new Map());
+      const source = entryGroup.get(entry.source)!;
+      for (const status of statuses) {
+        if (!source.has(status)) source.set(status, new Set());
+        source.get(status)!.add({ slug: entry.slug });
       }
     }
 
@@ -155,9 +151,8 @@ export class IndexBuilder {
       const rsc = this.resolver.resolveOne(source);
       if (!rsc.indexes) continue;
 
-      /* --- 1. D / A+M を分離 ------------------------------------ */
+      /* --- 1. Load current records and old-value delete records --- */
       const addOrMod = entries.get("A") ?? new Set();
-      (entries.get("M") ?? new Set()).forEach((p) => addOrMod.add(p));
       const delOnly = entries.get("D") ?? new Set();
 
       const slugsToLoad = [...addOrMod].map((p) => p.slug);
@@ -186,7 +181,10 @@ export class IndexBuilder {
       for (const { slug } of delOnly) {
         const diff = diffMap.get(source)!.get(slug);
         if (!diff) continue;
-        const record = makePseudo(diff);
+        const record = makePseudo({
+          ...diff,
+          fields: diff.status === "M" ? diff.oldFields : diff.fields,
+        });
         changedRows.get(rsc.name)!.add(record);
         deletedRecords.get(rsc.name)!.set(slug, record);
         deletedRows.add(record);
@@ -213,11 +211,13 @@ export class IndexBuilder {
             if (!through) {
               const prefixIndexLine = (
                 await Promise.all(
-                  [...data].map((s) =>
-                    this.reader.findIndexLines(
-                      rel.through,
-                      rel.throughForeignKey,
-                      s[rel.sourceLocalKey]
+                  [...data].flatMap((s) =>
+                    resolveField(s, rel.sourceLocalKey).map((value) =>
+                      this.reader.findIndexLines(
+                        rel.through,
+                        rel.throughForeignKey,
+                        value
+                      )
                     )
                   )
                 )
@@ -252,11 +252,13 @@ export class IndexBuilder {
             if (!to) {
               const prefixIndexLine = (
                 await Promise.all(
-                  [...through].map((s) =>
-                    this.reader.findIndexLines(
-                      rel.to,
-                      rel.targetForeignKey,
-                      s[rel.throughLocalKey]
+                  [...through].flatMap((s) =>
+                    resolveField(s, rel.throughLocalKey).map((value) =>
+                      this.reader.findIndexLines(
+                        rel.to,
+                        rel.targetForeignKey,
+                        value
+                      )
                     )
                   )
                 )
@@ -422,14 +424,16 @@ export class IndexBuilder {
       }
     }
 
-    for (const [source, _] of entryGroup.entries()) {
+    for (const [source] of entryGroup.entries()) {
       const rsc = this.resolver.resolveOne(source);
       const relations = rsc.relations ?? [];
 
       if (!rsc.indexes || !relations) continue;
 
+      const recordStatuses = new Map<SourceRecord, "A" | "D">();
       const records = [...changedRows.get(rsc.name)!].map((row) => {
         const result = { ...row };
+        recordStatuses.set(result, deletedRows.has(row) ? "D" : "A");
         for (const [key, rel] of Object.entries(relations)) {
           const view = relationData.get(rsc.name)!.get(key)![
             deletedRows.has(row) ? "D" : "A"
@@ -457,60 +461,57 @@ export class IndexBuilder {
         return result;
       });
 
-      const prefixes = this.getPrefixIndexPathByResolvedRecords(
-        records,
-        rsc.indexes
-      );
+      for (const status of ["D", "A"] as const) {
+        const statusRecords = records.filter((row) =>
+          recordStatuses.get(row) === status
+        );
+        if (!statusRecords.length) continue;
+        const prefixes = this.getPrefixIndexPathByResolvedRecords(
+          statusRecords,
+          rsc.indexes
+        );
+        const entries = this.createIndexLines(statusRecords, prefixes, rsc, status);
 
-      const entries = this.createIndexLines(records, prefixes, rsc, entryGroup);
+        for await (const [path, contents] of Array.from(entries)) {
+          let data: Set<PrefixIndexLine> = new Set();
+          if (await this.repository.exists(path)) {
+            const existedRaw = await this.repository.readFile(path);
+            data = new Set(existedRaw.split("\n").map((raw) => JSON.parse(raw)));
+          }
 
-      for await (const [path, contents] of Array.from(entries)) {
-        let data: Set<PrefixIndexLine> = new Set();
-        if (await this.repository.exists(path)) {
-          const existedRaw = await this.repository.readFile(path);
-          data = new Set(existedRaw.split("\n").map((raw) => JSON.parse(raw)));
-        }
+          for (const [entryStatus, contentEntries] of contents) {
+            for (const c of contentEntries) {
+              if (entryStatus === "A") {
+                const same = [...data].find((e) => e.v === c.v && e.vs === c.vs);
+                if (same) {
+                  same.ref = { ...same.ref, ...c.ref };
+                } else {
+                  data.add(c);
+                }
+              } else if (entryStatus === "D") {
+                for (const same of [...data].filter((e) => e.v === c.v && e.vs === c.vs)) {
+                  for (const slug of Object.keys(c.ref)) delete same.ref[slug];
+                  if (Object.keys(same.ref).length === 0) data.delete(same);
+                }
+              }
 
-        for (const [status, contentEntries] of contents) {
-          for (const c of contentEntries) {
-            if (status === "A") {
-              const same = [...data].find((e) => e.v === c.v && e.vs === c.vs);
-              if (same) {
-                same.ref = { ...same.ref, ...c.ref };
+              const raw = [...data]
+                .sort(indexSort())
+                .map((c) => JSON.stringify(c))
+                .join("\n");
+
+              if (!raw.length) {
+                await this.repository.removeDir(toParent(path));
+                touched.push(path);
               } else {
-                data.add(c);
+                await this.repository.writeFile(path, raw);
+                touched.push(path);
               }
-            } else if (status === "D") {
-              const same = [...data].find((e) => e.v === c.v && e.vs === c.vs);
-              if (same) {
-                data.delete(same);
-              }
-            }
-
-            const raw = [...data]
-              .sort(indexSort())
-              .map((c) => JSON.stringify(c))
-              .join("\n");
-
-            if (!raw.length) {
-              await this.repository.removeDir(toParent(path));
-              touched.push(path);
-            } else {
-              await this.repository.writeFile(path, raw);
-              touched.push(path);
             }
           }
+
         }
-      }
-
-      for await (const [status, values] of this.collectPrefixDirs(
-        prefixes,
-        rsc,
-        entryGroup
-      ).entries()) {
-        for (const [path, value] of values) {
-          if (!(await this.repository.exists(path))) continue;
-
+        for (const [path, value] of this.collectPrefixDirs(prefixes, rsc)) {
           if (status === "A") {
             if (await this.repository.exists(path)) {
               const existsRaw = await this.repository.readFile(path);
@@ -534,7 +535,8 @@ export class IndexBuilder {
               await this.repository.writeFile(path, raw);
               touched.push(path);
             }
-          } else if (status === "D") {
+          } else {
+            if (!(await this.repository.exists(path))) continue;
             const existsRaw = await this.repository.readFile(path);
             const existed = new Set(existsRaw.split("\n").map((raw) => raw));
 
@@ -692,7 +694,7 @@ export class IndexBuilder {
     records: SourceRecord[],
     prefixes: Map<string, Map<string, Set<string>>>,
     rsc: RSC,
-    entryGroup?: EntryGroup
+    statusOverride: "A" | "D" = "A"
   ) {
     if (!rsc.indexes) return [];
 
@@ -755,9 +757,7 @@ export class IndexBuilder {
             const root = getPrefixIndexPath(value, indexConfig.depth);
             const path = toI(indexConfig.dir, root);
 
-            const status = entryGroup
-              ? this.getStatus(entryGroup, rsc.name, slug)
-              : "A";
+            const status = statusOverride;
 
             const entry = {
               v: value,
@@ -789,18 +789,13 @@ export class IndexBuilder {
    */
   private collectPrefixDirs(
     data: Map<string, Map<string, Set<string>>>,
-    rsc: RSC,
-    entryGroup?: Map<string, Map<DiffEntry["status"], Set<{ slug: string }>>>
-  ): Map<string, Map<string, Set<string>>> {
-    const result = new Map<string, Map<string, Set<string>>>();
+    rsc: RSC
+  ): Map<string, Set<string>> {
+    const result = new Map<string, Set<string>>();
 
     if (!rsc.indexes) throw new Error(`[${rsc.name}] has no indexes configured`);
 
-    for (const [slug, fieldMap] of data.entries()) {
-      const status = entryGroup
-        ? this.getStatus(entryGroup, rsc.name, slug)
-        : "A";
-
+    for (const fieldMap of data.values()) {
       for (const [fieldName, prefixes] of fieldMap.entries()) {
         const indexConfig = rsc.indexes[fieldName];
         for (const prefix of prefixes) {
@@ -810,17 +805,8 @@ export class IndexBuilder {
           for (let i = 0; i < parts.length; i++) {
             const dir = parts[i];
 
-            if (!result.has(status)) {
-              result.set(status, new Map());
-            }
-
-            const dirs = result.get(status)!;
-
-            if (!dirs.has(path)) {
-              dirs.set(path, new Set());
-            }
-
-            dirs.get(path)!.add(dir);
+            if (!result.has(path)) result.set(path, new Set());
+            result.get(path)!.add(dir);
 
             path += dir + "/";
           }
@@ -829,49 +815,12 @@ export class IndexBuilder {
     }
 
     // convert to prefix index file path list
-    const final = new Map<string, Map<string, Set<string>>>();
-    for (const [status, dirMap] of result.entries()) {
-      const reversedMap = new Map(Array.from(dirMap).reverse());
-
-      const out = new Map<string, Set<string>>();
-      for (const [dir, items] of reversedMap.entries()) {
-        out.set(
-          toP(dir),
-          new Set([...items].sort(compareOrdinal))
-        );
-      }
-      final.set(status, out);
+    const final = new Map<string, Set<string>>();
+    for (const [dir, items] of Array.from(result).reverse()) {
+      final.set(toP(dir), new Set([...items].sort(compareOrdinal)));
     }
 
     return final;
-  }
-
-  /**
-   * Get incremental index entry status.
-   */
-  private getStatus(diffMap: EntryGroup, sourceName: string, slug: string) {
-    const statusMap = diffMap.get(sourceName);
-    if (!statusMap)
-      throw new Error(
-        `[${sourceName}] is not found in diff entries`
-      );
-
-    let result: DiffEntry["status"] | null = null;
-
-    for (const [status, entries] of statusMap.entries()) {
-      for (const entry of entries) {
-        if (entry.slug === slug) {
-          result = status;
-        }
-      }
-    }
-
-    if (!result)
-      throw new Error(
-        `[${sourceName}] slug "${slug}" is not found in diff entries`
-      );
-
-    return result;
   }
 
   /**

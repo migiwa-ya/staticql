@@ -181,6 +181,25 @@ describe("incremental through relation datasets", () => {
       { source: "s", field: "direct.name", value: "a", slugs: ["two"] },
     ]);
   });
+
+  it("uses generated non-slug indexes for through keys during incremental updates (#71/C3)", async () => {
+    const chain = throughRelation("hasManyThrough");
+    const config: StaticQLConfig = { sources: {
+      s: source("s", ["chain.name"], { chain }),
+      t: source("t", ["name"]),
+      w: source("w", ["name"]),
+    } };
+    const fixture = await createFixture(config, throughTargets);
+    const added = { slug: "two", owner: "OWNER-z" };
+    writeRecord(fixture.root, "s", added);
+    await fixture.staticql.getIndexer().updateIndexesForFiles([
+      { status: "A", source: "s", slug: "two", fields: { owner: ["OWNER-z"] } },
+    ]);
+    await expectMatchesFull(fixture.staticql, config, { ...throughTargets, s: [added] }, [
+      { source: "s", field: "chain.name", value: "z", slugs: ["two"] },
+      { source: "s", field: "chain.name", value: "a", slugs: [] },
+    ]);
+  });
 });
 
 function deleteRecord(root: string, sourceName: string, slug: string) {
@@ -258,13 +277,39 @@ describe("incremental deletion views (C5)", () => {
     ]);
   });
 
-  it("preserves the through source-only D error (#72/E3)", async () => {
+  it("removes through indexes when only the source row is deleted (#72)", async () => {
     const config = deletionConfig(false);
     const fixture = await createFixture(config, deletionData);
     deleteRecord(fixture.root, "s", "two");
-    await expect(fixture.staticql.getIndexer().updateIndexesForFiles([deletedSource])).rejects.toThrow(
-      "[s] failed to find index lines for through relation: source=t, field=owner"
-    );
+    await fixture.staticql.getIndexer().updateIndexesForFiles([deletedSource]);
+    await expectMatchesFull(fixture.staticql, config, {
+      t: deletionData.t,
+      w: deletionData.w,
+    }, [
+      { source: "s", field: "chain.name", value: "end", slugs: [] },
+    ]);
+  });
+
+  it("resolves array-valued sourceLocalKey values for through additions", async () => {
+    const config: StaticQLConfig = { sources: {
+      s: source("s", ["chain.name"], { chain: throughRelation("hasManyThrough") }),
+      t: source("t", ["owner", "target", "name"]),
+      w: source("w", ["code", "name"]),
+    } };
+    const arrayThroughTargets = {
+      ...throughTargets,
+      t: throughTargets.t.map((record) => ({ ...record, target: [record.target] })),
+    };
+    const fixture = await createFixture(config, arrayThroughTargets);
+    const added = { slug: "two", owner: ["OWNER-a", "OWNER-z"] };
+    writeRecord(fixture.root, "s", added);
+    await fixture.staticql.getIndexer().updateIndexesForFiles([
+      { status: "A", source: "s", slug: "two", fields: { owner: added.owner } },
+    ]);
+    await expectMatchesFull(fixture.staticql, config, { ...arrayThroughTargets, s: [added] }, [
+      { source: "s", field: "chain.name", value: "a", slugs: ["two"] },
+      { source: "s", field: "chain.name", value: "z", slugs: ["two"] },
+    ]);
   });
 });
 
