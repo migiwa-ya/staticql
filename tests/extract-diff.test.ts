@@ -114,3 +114,48 @@ describe("extractDiff slug consistency (#59)", () => {
       .toEqual([]);
   });
 });
+
+describe("extractDiff relation-derived fields (#69)", () => {
+  test("emits a target modification when only a related indexed field changes", async () => {
+    const filePath = "t/a.md";
+    const oldText = "---\nslug: a\nname: old\n---\n";
+    const newText = "---\nslug: a\nname: updated\n---\n";
+    const config: StaticQLConfig = {
+      sources: {
+        s: {
+          type: "markdown",
+          pattern: "s/*.md",
+          schema: { type: "object" },
+          index: { "r.name": {} },
+          relations: {
+            r: { type: "hasMany", to: "t", localKey: "rel", foreignKey: "slug" },
+          },
+        },
+        t: {
+          type: "markdown",
+          pattern: "t/*.md",
+          schema: { type: "object" },
+          index: {},
+        },
+      },
+    };
+    const result = await extractDiff({
+      baseRef: "base",
+      headRef: "head",
+      baseDir: "",
+      config,
+      diffProvider: new InMemoryDiffProvider(
+        [{ status: "M", path: filePath }],
+        new Map([[`head:${filePath}`, newText], [`base:${filePath}`, oldText]])
+      ),
+    });
+
+    expect(result).toEqual([{
+      status: "M",
+      source: "t",
+      slug: "a",
+      fields: { slug: "a", name: ["updated"] },
+      oldFields: { slug: "a", name: ["old"] },
+    }]);
+  });
+});

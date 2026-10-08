@@ -8,6 +8,7 @@ import {
 } from "../SourceConfigResolver.js";
 import { resolveField } from "../utils/field.js";
 import { asArray } from "../utils/normalize.js";
+import { isThroughRelation } from "../constants.js";
 
 export interface ExtractDiffOpts {
   baseRef: string;
@@ -102,6 +103,27 @@ export async function extractDiff(opts: ExtractDiffOpts): Promise<DiffEntry[]> {
       } else {
         // index / relation localKey
         out[key] = resolveField(rec, key);
+      }
+    }
+
+    // Preserve fields used by configured relation indexes on other sources.
+    // These values are needed to remove stale relation index entries and to
+    // rebuild the affected entries when a related record changes.
+    for (const indexedSource of resolved) {
+      for (const [relationKey, rel] of Object.entries(indexedSource.relations ?? {})) {
+        if (isThroughRelation(rel) && rel.through === rsc.name && rel.throughLocalKey !== "slug") {
+          if (!Object.hasOwn(out, rel.throughLocalKey)) {
+            out[rel.throughLocalKey] = resolveField(rec, rel.throughLocalKey);
+          }
+        }
+
+        if (rel.to !== rsc.name) continue;
+        const prefix = `${relationKey}.`;
+        for (const indexedField of Object.keys(indexedSource.indexes ?? {})) {
+          if (!indexedField.startsWith(prefix)) continue;
+          const field = indexedField.slice(prefix.length);
+          if (!Object.hasOwn(out, field)) out[field] = resolveField(rec, field);
+        }
       }
     }
 
