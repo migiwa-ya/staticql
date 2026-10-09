@@ -1043,10 +1043,28 @@ export class IndexBuilder {
     > = new Map();
 
     for (const field of indexFields) {
-      let valueArr = resolveIndexValues(record, field, rsc.relations);
-
-      let valueSlugs = new Array(valueArr.length).fill(record.slug);
       const ref = field.split(".").shift() ?? "";
+      const rest = field.split(".").slice(1).join(".");
+
+      if (rsc.relations?.hasOwnProperty(ref) && rest) {
+        const relationTargets = record[ref];
+        const targets = Array.isArray(relationTargets)
+          ? relationTargets
+          : relationTargets == null ? [] : [relationTargets];
+
+        for (const target of targets) {
+          const targetValues = resolveIndexValues(target, rest, undefined);
+          if (targetValues.length === 0) continue;
+          if (!values.has(field)) values.set(field, new Set());
+          for (const value of targetValues) {
+            values.get(field)?.add({ value, refSlug: target.slug });
+          }
+        }
+        continue;
+      }
+
+      let valueArr = resolveIndexValues(record, field, rsc.relations);
+      let valueSlugs = new Array(valueArr.length).fill(record.slug);
       if (rsc.relations?.hasOwnProperty(ref)) {
         valueSlugs = resolveField(record, `${ref}.slug`);
       }
