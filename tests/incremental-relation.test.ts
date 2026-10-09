@@ -6,6 +6,7 @@ import { defineStaticQL, StaticQLConfig } from "../src/index.js";
 import { StaticQL } from "../src/StaticQL.js";
 import { FsRepository } from "../src/repository/FsRepository.js";
 import { DiffEntry, Relation, SourceRecord } from "../src/types.js";
+import { INDEX_PREFIX } from "../src/constants.js";
 import { extractDiff } from "../src/diff/extractDiff.js";
 import type { DiffLine, DiffProvider } from "../src/diff/providers/index.js";
 
@@ -13,6 +14,7 @@ type RecordFixture = { slug: string; [key: string]: unknown };
 type DataFixture = Record<string, RecordFixture[]>;
 type QueryExpectation = { source: string; field: string; value: string; slugs: string[] };
 const roots: string[] = [];
+const rootsByStaticQL = new WeakMap<StaticQL, string>();
 
 afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
@@ -31,9 +33,14 @@ function source(name: string, index: string[], relations?: Record<string, Relati
 function writeRecord(root: string, sourceName: string, record: RecordFixture) {
   const dir = path.join(root, sourceName);
   fs.mkdirSync(dir, { recursive: true });
-  const fields = Object.entries(record).map(([key, value]) =>
-    `${key}: ${Array.isArray(value) ? JSON.stringify(value) : value}`
-  );
+  const serialize = (key: string, value: unknown, indent = ""): string[] => {
+    if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+      return [`${indent}${key}:`, ...Object.entries(value).flatMap(([childKey, childValue]) =>
+        serialize(childKey, childValue, `${indent}  `))];
+    }
+    return [`${indent}${key}: ${Array.isArray(value) ? JSON.stringify(value) : value}`];
+  };
+  const fields = Object.entries(record).flatMap(([key, value]) => serialize(key, value));
   fs.writeFileSync(path.join(dir, `${record.slug}.md`), `---\n${fields.join("\n")}\n---\n`);
 }
 
@@ -42,9 +49,16 @@ async function createFixture(config: StaticQLConfig, data: DataFixture) {
   roots.push(root);
   for (const name of Object.keys(config.sources)) fs.mkdirSync(path.join(root, name));
   for (const [name, records] of Object.entries(data)) {
-    for (const record of records) writeRecord(root, name, record);
+    for (const record of records) {
+      if (config.sources[name].type === "json") {
+        fs.writeFileSync(path.join(root, name, `${record.slug}.json`), JSON.stringify(record));
+      } else {
+        writeRecord(root, name, record);
+      }
+    }
   }
   const staticql = defineStaticQL(config)({ repository: new FsRepository(root) });
+  rootsByStaticQL.set(staticql, root);
   await staticql.saveIndexes();
   return { root, staticql };
 }
@@ -59,16 +73,48 @@ async function expectMatchesFull(
   staticql: StaticQL,
   config: StaticQLConfig,
   finalData: DataFixture,
-  queries: QueryExpectation[]
+  queries: QueryExpectation[],
+  compareIndexFiles = false
 ) {
   // A separate root prevents old index files from affecting the full-build oracle.
   const full = await createFixture(config, finalData);
+  if (compareIndexFiles) expectIndexFilesMatchFull(rootsByStaticQL.get(staticql)!, full.root);
   for (const query of queries) {
     const incrementalSlugs = await slugsOf(staticql, query);
     const fullSlugs = await slugsOf(full.staticql, query);
     expect(incrementalSlugs).toEqual(query.slugs);
     expect(fullSlugs).toEqual(query.slugs);
     expect(incrementalSlugs).toEqual(fullSlugs);
+  }
+}
+
+function collectTree(root: string) {
+  const files = new Map<string, string>();
+  const directories = new Set<string>();
+  const visit = (directory: string, relative = "") => {
+    if (!fs.existsSync(directory)) return;
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const rel = path.posix.join(relative, entry.name);
+      const absolute = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        directories.add(rel);
+        visit(absolute, rel);
+      } else if (entry.isFile()) {
+        files.set(rel, fs.readFileSync(absolute, "utf8"));
+      }
+    }
+  };
+  visit(root);
+  return { files, directories };
+}
+
+function expectIndexFilesMatchFull(incrementalRoot: string, fullRoot: string) {
+  const incremental = collectTree(path.join(incrementalRoot, INDEX_PREFIX));
+  const full = collectTree(path.join(fullRoot, INDEX_PREFIX));
+  expect([...incremental.directories].sort()).toEqual([...full.directories].sort());
+  expect([...incremental.files.keys()].sort()).toEqual([...full.files.keys()].sort());
+  for (const [relativePath, content] of full.files) {
+    expect(incremental.files.get(relativePath), relativePath).toBe(content);
   }
 }
 
@@ -745,5 +791,465 @@ describe("incremental relation propagation from changed targets (#69)", () => {
     await expectMatchesFull(fixture.staticql, config, { s: sourceRows, t: [], w: targetRows }, [
       { source: "s", field: "chain.name", value: "old", slugs: [] },
     ]);
+  });
+});
+
+describe("incremental relation propagation from added targets (#79)", () => {
+  it.each([
+    {
+      name: "hasMany",
+      relation: { type: "hasMany", to: "t", localKey: "rel", foreignKey: "slug" } as Relation,
+      field: "rel",
+      value: "b",
+      targetField: "slug",
+    },
+    {
+      name: "belongsTo",
+      relation: { type: "belongsTo", to: "t", localKey: "target", foreignKey: "id" } as Relation,
+      field: "target",
+      value: "ID-b",
+      targetField: "id",
+    },
+    {
+      name: "belongsToMany",
+      relation: { type: "belongsToMany", to: "t", localKey: "ids", foreignKey: "id" } as Relation,
+      field: "ids",
+      value: ["ID-b"],
+      targetField: "id",
+    },
+  ])("propagates a newly added target through $name (M1/C1)", async ({ relation, field, value, targetField }) => {
+    const config: StaticQLConfig = { sources: {
+      s: source("s", ["r.name"], { r: relation }),
+      t: source("t", ["id", "name"]),
+    } };
+    const row = { slug: "one", [field]: value };
+    const fixture = await createFixture(config, { s: [row], t: [] });
+    const target = { slug: "b", id: "ID-b", name: "new" };
+    writeRecord(fixture.root, "t", target);
+    await fixture.staticql.getIndexer().updateIndexesForFiles([{
+      status: "A", source: "t", slug: "b",
+      fields: { slug: "b", [targetField]: target[targetField as keyof typeof target], name: ["new"] },
+    }]);
+    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [target] }, [
+      { source: "s", field: "r.name", value: "new", slugs: ["one"] },
+      { source: "s", field: "r.name", value: "old", slugs: [] },
+    ], true);
+  });
+
+  it.each(["hasOneThrough", "hasManyThrough"] as const)("propagates added through rows and targets for %s", async (type) => {
+    const relation = throughRelation(type);
+    const direct: Relation = { type: "hasMany", to: "w", localKey: "directId", foreignKey: "id" };
+    const scenarios = [
+      {
+        name: "through row added",
+        initial: { s: [{ slug: "one", owner: "OWNER-a", directId: "W-end" }], t: [], w: [{ slug: "end", id: "W-end", code: "CODE-a", name: "new" }] },
+        added: [{ source: "t", slug: "link", record: { slug: "link", owner: "OWNER-a", target: "CODE-a" }, fields: { owner: ["OWNER-a"], target: ["CODE-a"] } }],
+        final: { s: [{ slug: "one", owner: "OWNER-a", directId: "W-end" }], t: [{ slug: "link", owner: "OWNER-a", target: "CODE-a" }], w: [{ slug: "end", id: "W-end", code: "CODE-a", name: "new" }] },
+      },
+      {
+        name: "target added",
+        initial: { s: [{ slug: "one", owner: "OWNER-a", directId: "W-end" }], t: [{ slug: "link", owner: "OWNER-a", target: "CODE-new" }], w: [] },
+        added: [{ source: "w", slug: "end", record: { slug: "end", id: "W-end", code: "CODE-new", name: "new" }, fields: { id: ["W-end"], code: ["CODE-new"], name: ["new"] } }],
+        final: { s: [{ slug: "one", owner: "OWNER-a", directId: "W-end" }], t: [{ slug: "link", owner: "OWNER-a", target: "CODE-new" }], w: [{ slug: "end", id: "W-end", code: "CODE-new", name: "new" }] },
+      },
+      {
+        name: "through row and target added together",
+        initial: { s: [{ slug: "one", owner: "OWNER-a", directId: "W-end" }], t: [], w: [] },
+        added: [
+          { source: "t", slug: "link", record: { slug: "link", owner: "OWNER-a", target: "CODE-new" }, fields: { owner: ["OWNER-a"], target: ["CODE-new"] } },
+          { source: "w", slug: "end", record: { slug: "end", id: "W-end", code: "CODE-new", name: "new" }, fields: { id: ["W-end"], code: ["CODE-new"], name: ["new"] } },
+        ],
+        final: { s: [{ slug: "one", owner: "OWNER-a", directId: "W-end" }], t: [{ slug: "link", owner: "OWNER-a", target: "CODE-new" }], w: [{ slug: "end", id: "W-end", code: "CODE-new", name: "new" }] },
+      },
+    ];
+    for (const reverse of [false, true]) for (const scenario of scenarios) {
+      const config: StaticQLConfig = { sources: {
+        s: source("s", ["chain.name", "direct.name"], reverse ? { direct, chain: relation } : { chain: relation, direct }),
+        t: source("t", ["owner", "target"]),
+        w: source("w", ["id", "code", "name"]),
+      } };
+      const fixture = await createFixture(config, scenario.initial);
+      for (const item of scenario.added) writeRecord(fixture.root, item.source, item.record);
+      await fixture.staticql.getIndexer().updateIndexesForFiles(scenario.added.map((item) => ({
+        status: "A" as const, source: item.source, slug: item.slug,
+        fields: { slug: item.slug, ...item.fields },
+      })));
+      await expectMatchesFull(fixture.staticql, config, scenario.final, [
+        { source: "s", field: "chain.name", value: "new", slugs: ["one"] },
+        { source: "s", field: "chain.name", value: "old", slugs: [] },
+        { source: "s", field: "direct.name", value: "new", slugs: ["one"] },
+      ], true);
+    }
+  });
+
+  it("matches full indexes when additions and deletions share a diff (C2)", async () => {
+    const config: StaticQLConfig = { sources: {
+      s: source("s", ["r.name"], { r: bySlug }),
+      t: source("t", ["name"]),
+    } };
+    const row = { slug: "one", rel: ["old", "new"] };
+    const oldTarget = { slug: "old", name: "old" };
+    const fixture = await createFixture(config, { s: [row], t: [oldTarget] });
+    const addedTarget = { slug: "new", name: "new" };
+    deleteRecord(fixture.root, "t", "old");
+    writeRecord(fixture.root, "t", addedTarget);
+    await fixture.staticql.getIndexer().updateIndexesForFiles([
+      { status: "A", source: "t", slug: "new", fields: { slug: "new", name: ["new"] } },
+      { status: "D", source: "t", slug: "old", fields: { slug: "old", name: ["old"] } },
+    ]);
+    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [addedTarget] }, [
+      { source: "s", field: "r.name", value: "new", slugs: ["one"] },
+      { source: "s", field: "r.name", value: "old", slugs: [] },
+    ], true);
+  });
+
+  it("keeps added target indexes correct through a later modify and delete (M2)", async () => {
+    const config: StaticQLConfig = { sources: {
+      s: source("s", ["r.name"], { r: bySlug }),
+      t: source("t", ["name"]),
+    } };
+    const row = { slug: "one", rel: ["b"] };
+    const fixture = await createFixture(config, { s: [row], t: [] });
+    const added = { slug: "b", name: "first" };
+    writeRecord(fixture.root, "t", added);
+    await fixture.staticql.getIndexer().updateIndexesForFiles([
+      { status: "A", source: "t", slug: "b", fields: { slug: "b", name: ["first"] } },
+    ]);
+    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [added] }, [
+      { source: "s", field: "r.name", value: "first", slugs: ["one"] },
+      { source: "s", field: "r.name", value: "second", slugs: [] },
+    ], true);
+
+    const modified = { slug: "b", name: "second" };
+    writeRecord(fixture.root, "t", modified);
+    await fixture.staticql.getIndexer().updateIndexesForFiles([{
+      status: "M", source: "t", slug: "b",
+      fields: { slug: "b", name: ["second"] }, oldFields: { slug: "b", name: ["first"] },
+    }]);
+    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [modified] }, [
+      { source: "s", field: "r.name", value: "first", slugs: [] },
+      { source: "s", field: "r.name", value: "second", slugs: ["one"] },
+    ], true);
+
+    deleteRecord(fixture.root, "t", "b");
+    await fixture.staticql.getIndexer().updateIndexesForFiles([
+      { status: "D", source: "t", slug: "b", fields: { slug: "b", name: ["second"] } },
+    ]);
+    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [] }, [
+      { source: "s", field: "r.name", value: "second", slugs: [] },
+    ], true);
+  });
+
+  it("does not duplicate a source row added with its target", async () => {
+    const config: StaticQLConfig = { sources: {
+      s: source("s", ["r.name"], { r: bySlug }),
+      t: source("t", ["name"]),
+    } };
+    const fixture = await createFixture(config, { s: [], t: [] });
+    const row = { slug: "one", rel: ["b"] };
+    const target = { slug: "b", name: "new" };
+    writeRecord(fixture.root, "s", row);
+    writeRecord(fixture.root, "t", target);
+    await fixture.staticql.getIndexer().updateIndexesForFiles([
+      { status: "A", source: "s", slug: "one", fields: { slug: "one", rel: ["b"] } },
+      { status: "A", source: "t", slug: "b", fields: { slug: "b", name: ["new"] } },
+    ]);
+    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [target] }, [
+      { source: "s", field: "r.name", value: "new", slugs: ["one"] },
+    ], true);
+  });
+
+  it("propagates an added target from extractDiff fields", async () => {
+    const relation: Relation = { type: "hasMany", to: "t", localKey: "rel", foreignKey: "id" };
+    const config: StaticQLConfig = { sources: {
+      s: source("s", ["r.name"], { r: relation }),
+      t: source("t", []),
+    } };
+    const row = { slug: "one", rel: ["ID-b"] };
+    const fixture = await createFixture(config, { s: [row], t: [] });
+    const newText = "---\nslug: b\nid: ID-b\nname: new\n---\n";
+    const entries = await inMemoryDiff(config, "A", "t/b.md", newText);
+    expect(entries).toEqual([{
+      status: "A", source: "t", slug: "b",
+      fields: { slug: "b", id: ["ID-b"], name: ["new"] },
+    }]);
+    writeRecord(fixture.root, "t", { slug: "b", id: "ID-b", name: "new" });
+    await fixture.staticql.getIndexer().updateIndexesForFiles(entries);
+    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [{ slug: "b", id: "ID-b", name: "new" }] }, [
+      { source: "s", field: "r.name", value: "new", slugs: ["one"] },
+    ], true);
+  });
+
+  it("does not validate unrelated dangling relations on propagated rows (S2)", async () => {
+    const config: StaticQLConfig = { sources: {
+      s: source("s", ["r.name", "other.name"], {
+        r: { type: "hasMany", to: "t", localKey: "rel", foreignKey: "slug" },
+        other: { type: "hasMany", to: "u", localKey: "missing", foreignKey: "slug" },
+      }),
+      t: source("t", ["name"]),
+      u: source("u", ["name"]),
+    } };
+    const row = { slug: "one", rel: ["b"], missing: ["ghost"] };
+    const fixture = await createFixture(config, { s: [row], t: [], u: [] });
+    const target = { slug: "b", name: "new" };
+    writeRecord(fixture.root, "t", target);
+    await fixture.staticql.getIndexer().updateIndexesForFiles([
+      { status: "A", source: "t", slug: "b", fields: { slug: "b", name: ["new"] } },
+    ]);
+    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [target], u: [] }, [
+      { source: "s", field: "r.name", value: "new", slugs: ["one"] },
+      { source: "s", field: "other.name", value: "anything", slugs: [] },
+    ], true);
+  });
+
+  it("matches full indexes for two-hop relation paths through A/M/D changes (C3a)", async () => {
+    const relation: Relation = { type: "hasMany", to: "t", localKey: "rel", foreignKey: "slug" };
+    const nested: Relation = { type: "hasMany", to: "u", localKey: "next", foreignKey: "slug" };
+    const config: StaticQLConfig = { sources: {
+      s: source("s", ["r.x.name"], { r: relation }),
+      t: source("t", ["x.name", "name"], { x: nested }),
+      u: source("u", ["name"]),
+    } };
+    const row = { slug: "one", rel: ["middle"] };
+    const fixture = await createFixture(config, { s: [row], t: [], u: [] });
+    const query = [{ source: "s", field: "r.x.name", value: "deep", slugs: [] }];
+    const end = { slug: "end", name: "deep" };
+    writeRecord(fixture.root, "u", end);
+    await fixture.staticql.getIndexer().updateIndexesForFiles([
+      { status: "A", source: "u", slug: "end", fields: { slug: "end", name: ["deep"] } },
+    ]);
+    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [], u: [end] }, query, true);
+
+    const middle = { slug: "middle", next: ["end"], name: "middle" };
+    writeRecord(fixture.root, "t", middle);
+    await fixture.staticql.getIndexer().updateIndexesForFiles([
+      { status: "A", source: "t", slug: "middle", fields: { slug: "middle", next: ["end"], name: ["middle"] } },
+    ]);
+    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [middle], u: [end] }, query, true);
+
+    const changedMiddle = { ...middle, name: "middle changed" };
+    writeRecord(fixture.root, "t", changedMiddle);
+    await fixture.staticql.getIndexer().updateIndexesForFiles([{
+      status: "M", source: "t", slug: "middle",
+      fields: { slug: "middle", next: ["end"], name: ["middle changed"] },
+      oldFields: { slug: "middle", next: ["end"], name: ["middle"] },
+    }]);
+    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [changedMiddle], u: [end] }, query, true);
+
+    const changedEnd = { slug: "end", name: "deeper" };
+    writeRecord(fixture.root, "u", changedEnd);
+    await fixture.staticql.getIndexer().updateIndexesForFiles([{
+      status: "M", source: "u", slug: "end",
+      fields: { slug: "end", name: ["deeper"] }, oldFields: { slug: "end", name: ["deep"] },
+    }]);
+    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [changedMiddle], u: [changedEnd] }, query, true);
+
+    deleteRecord(fixture.root, "t", "middle");
+    await fixture.staticql.getIndexer().updateIndexesForFiles([
+      { status: "D", source: "t", slug: "middle", fields: { slug: "middle", next: ["end"], name: ["middle changed"] } },
+    ]);
+    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [], u: [changedEnd] }, query, true);
+
+    deleteRecord(fixture.root, "u", "end");
+    await fixture.staticql.getIndexer().updateIndexesForFiles([
+      { status: "D", source: "u", slug: "end", fields: { slug: "end", name: ["deeper"] } },
+    ]);
+    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [], u: [] }, query, true);
+  });
+
+  it("matches full indexes for an ordinary nested target field through A/M/D (C3b)", async () => {
+    const relation: Relation = { type: "hasMany", to: "t", localKey: "rel", foreignKey: "slug" };
+    const config: StaticQLConfig = { sources: {
+      s: source("s", ["r.meta.name"], { r: relation }),
+      t: source("t", ["meta.name"]),
+    } };
+    const row = { slug: "one", rel: ["b"] };
+    const fixture = await createFixture(config, { s: [row], t: [] });
+    const added = { slug: "b", meta: { name: "first" } };
+    writeRecord(fixture.root, "t", added);
+    await fixture.staticql.getIndexer().updateIndexesForFiles([
+      { status: "A", source: "t", slug: "b", fields: { slug: "b", "meta.name": ["first"] } },
+    ]);
+    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [added] }, [
+      { source: "s", field: "r.meta.name", value: "first", slugs: ["one"] },
+    ], true);
+
+    const modified = { slug: "b", meta: { name: "second" } };
+    writeRecord(fixture.root, "t", modified);
+    await fixture.staticql.getIndexer().updateIndexesForFiles([{
+      status: "M", source: "t", slug: "b",
+      fields: { slug: "b", "meta.name": ["second"] },
+      oldFields: { slug: "b", "meta.name": ["first"] },
+    }]);
+    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [modified] }, [
+      { source: "s", field: "r.meta.name", value: "first", slugs: [] },
+      { source: "s", field: "r.meta.name", value: "second", slugs: ["one"] },
+    ], true);
+
+    deleteRecord(fixture.root, "t", "b");
+    await fixture.staticql.getIndexer().updateIndexesForFiles([
+      { status: "D", source: "t", slug: "b", fields: { slug: "b", "meta.name": ["second"] } },
+    ]);
+    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [] }, [
+      { source: "s", field: "r.meta.name", value: "second", slugs: [] },
+    ], true);
+  });
+
+  it("adds a newly available member of an array local key without losing existing matches", async () => {
+    const row = { slug: "one", rel: ["a", "b"] };
+    const existing = { slug: "a", name: "existing" };
+    const config: StaticQLConfig = { sources: {
+      s: source("s", ["r.name"], { r: bySlug }),
+      t: source("t", ["name"]),
+    } };
+    const fixture = await createFixture(config, { s: [row], t: [existing] });
+    const added = { slug: "b", name: "added" };
+    writeRecord(fixture.root, "t", added);
+    await fixture.staticql.getIndexer().updateIndexesForFiles([
+      { status: "A", source: "t", slug: "b", fields: { slug: "b", name: ["added"] } },
+    ]);
+    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [existing, added] }, [
+      { source: "s", field: "r.name", value: "existing", slugs: ["one"] },
+      { source: "s", field: "r.name", value: "added", slugs: ["one"] },
+    ], true);
+  });
+
+  it("propagates a self-relation target added in the same source", async () => {
+    const relation: Relation = { type: "hasMany", to: "s", localKey: "parent", foreignKey: "slug" };
+    const config: StaticQLConfig = { sources: {
+      s: source("s", ["r.name"], { r: relation }),
+    } };
+    const row = { slug: "one", parent: ["later"], name: "source" };
+    const fixture = await createFixture(config, { s: [row] });
+    const added = { slug: "later", name: "new target" };
+    writeRecord(fixture.root, "s", added);
+    await fixture.staticql.getIndexer().updateIndexesForFiles([
+      { status: "A", source: "s", slug: "later", fields: { slug: "later", name: ["new target"] } },
+    ]);
+    await expectMatchesFull(fixture.staticql, config, { s: [row, added] }, [
+      { source: "s", field: "r.name", value: "new target", slugs: ["one"] },
+    ], true);
+  });
+
+  it.each([
+    { value: "scalar parent", fields: { meta: ["scalar parent"], "meta.name": [] } },
+    { value: ["first parent", "second parent"], fields: { meta: ["first parent", "second parent"], "meta.name": [] } },
+  ])("removes a deleted row with a non-object parent value ($value)", async ({ value, fields }) => {
+    const config: StaticQLConfig = { sources: { t: source("t", ["meta", "meta.name"]) } };
+    const row = { slug: "gone", meta: value };
+    const fixture = await createFixture(config, { t: [row] });
+    deleteRecord(fixture.root, "t", "gone");
+    await fixture.staticql.getIndexer().updateIndexesForFiles([
+      { status: "D", source: "t", slug: "gone", fields: { slug: "gone", ...fields } },
+    ]);
+    await expectMatchesFull(fixture.staticql, config, { t: [] }, [
+      { source: "t", field: "meta", value: Array.isArray(value) ? value[0] : value, slugs: [] },
+    ], true);
+  });
+
+  it("removes the old parent-path value on a modified row with overlapping indexes", async () => {
+    const config: StaticQLConfig = { sources: { t: source("t", ["meta", "meta.name"]) } };
+    const fixture = await createFixture(config, { t: [{ slug: "one", meta: "old parent" }] });
+    writeRecord(fixture.root, "t", { slug: "one", meta: "new parent" });
+    await fixture.staticql.getIndexer().updateIndexesForFiles([{
+      status: "M", source: "t", slug: "one",
+      fields: { slug: "one", meta: ["new parent"], "meta.name": [] },
+      oldFields: { slug: "one", meta: ["old parent"], "meta.name": [] },
+    }]);
+    await expectMatchesFull(fixture.staticql, config, { t: [{ slug: "one", meta: "new parent" }] }, [
+      { source: "t", field: "meta", value: "old parent", slugs: [] },
+      { source: "t", field: "meta", value: "new parent", slugs: ["one"] },
+    ], true);
+  });
+
+  it("removes both parent and nested values when deleting an object parent", async () => {
+    const config: StaticQLConfig = { sources: { t: source("t", ["meta", "meta.name"]) } };
+    const fixture = await createFixture(config, { t: [{ slug: "one", meta: { name: "nested value" } }] });
+    deleteRecord(fixture.root, "t", "one");
+    await fixture.staticql.getIndexer().updateIndexesForFiles([{
+      status: "D", source: "t", slug: "one",
+      fields: { slug: "one", meta: ["[object Object]"], "meta.name": ["nested value"] },
+    }]);
+    await expectMatchesFull(fixture.staticql, config, { t: [] }, [
+      { source: "t", field: "meta", value: "[object Object]", slugs: [] },
+      { source: "t", field: "meta.name", value: "nested value", slugs: [] },
+    ], true);
+  });
+
+  it("matches full indexes when only some array objects have a nested child", async () => {
+    const relation: Relation = { type: "hasMany", to: "t", localKey: "rel", foreignKey: "slug" };
+    const config: StaticQLConfig = { sources: {
+      s: source("s", ["r.meta.name"], { r: relation }),
+      t: {
+        type: "json", pattern: "t/*.json", schema: { type: "object" },
+        index: { "meta.name": {} },
+      },
+    } };
+    const row = { slug: "source", rel: ["one"] };
+    const initial = { slug: "one", meta: [{ name: "child" }, {}] };
+    const fixture = await createFixture(config, { s: [row], t: [initial] });
+    expect(await slugsOf(fixture.staticql, {
+      source: "s", field: "r.meta.name", value: "child", slugs: [],
+    })).toEqual(["source"]);
+    const modified = { slug: "one", meta: [{ name: "changed" }, {}] };
+    fs.writeFileSync(path.join(fixture.root, "t", "one.json"), JSON.stringify(modified));
+    await fixture.staticql.getIndexer().updateIndexesForFiles([{
+      status: "M", source: "t", slug: "one",
+      fields: { slug: "one", meta: ["[object Object]", "[object Object]"], "meta.name": ["changed"] },
+      oldFields: { slug: "one", meta: ["[object Object]", "[object Object]"], "meta.name": ["child"] },
+    }]);
+    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [modified] }, [
+      { source: "s", field: "r.meta.name", value: "child", slugs: [] },
+      { source: "s", field: "r.meta.name", value: "changed", slugs: ["source"] },
+    ], true);
+
+    fs.rmSync(path.join(fixture.root, "t", "one.json"));
+    await fixture.staticql.getIndexer().updateIndexesForFiles([{
+      status: "D", source: "t", slug: "one",
+      fields: { slug: "one", meta: ["[object Object]", "[object Object]"], "meta.name": ["changed"] },
+    }]);
+    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [] }, [
+      { source: "s", field: "r.meta.name", value: "changed", slugs: [] },
+    ], true);
+  });
+
+  it("keeps literal dotted keys out of ordinary nested-path indexes", async () => {
+    const config: StaticQLConfig = { sources: { t: source("t", ["a.b"]) } };
+    const fixture = await createFixture(config, { t: [{ slug: "one", "a.b": "literal" }] });
+    expect(await slugsOf(fixture.staticql, {
+      source: "t", field: "a.b", value: "literal", slugs: [],
+    })).toEqual([]);
+  });
+
+  it("preserves resolveField behavior for deeply nested pseudo-free arrays", async () => {
+    const config: StaticQLConfig = { sources: { t: {
+      type: "json", pattern: "t/*.json", schema: { type: "object" },
+      index: { "meta.name": {} },
+    } } };
+    const fixture = await createFixture(config, {
+      t: [{ slug: "one", meta: [[[{ name: "v" }]]] }],
+    });
+    expect(await slugsOf(fixture.staticql, {
+      source: "t", field: "meta.name", value: "v", slugs: [],
+    })).toEqual([]);
+  });
+
+  it("keeps a normal target and deleted pseudo target aligned in a relation array", async () => {
+    const config: StaticQLConfig = { sources: {
+      s: source("s", ["r.name"], { r: bySlug }),
+      t: source("t", ["name"]),
+    } };
+    const row = { slug: "one", rel: ["a", "b"] };
+    const kept = { slug: "a", name: "keep" };
+    const removed = { slug: "b", name: "remove" };
+    const fixture = await createFixture(config, { s: [row], t: [kept, removed] });
+    deleteRecord(fixture.root, "t", "b");
+    await fixture.staticql.getIndexer().updateIndexesForFiles([{
+      status: "D", source: "t", slug: "b", fields: { slug: "b", name: ["remove"] },
+    }]);
+    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [kept] }, [
+      { source: "s", field: "r.name", value: "keep", slugs: ["one"] },
+      { source: "s", field: "r.name", value: "remove", slugs: [] },
+    ], true);
   });
 });
