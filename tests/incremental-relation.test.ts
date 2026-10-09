@@ -1002,7 +1002,7 @@ describe("incremental relation propagation from added targets (#79)", () => {
     ], true);
   });
 
-  it("matches full indexes for two-hop relation paths through A/M/D changes (C3a)", async () => {
+  it("rejects two-hop relation paths when saving indexes (C3a)", async () => {
     const relation: Relation = { type: "hasMany", to: "t", localKey: "rel", foreignKey: "slug" };
     const nested: Relation = { type: "hasMany", to: "u", localKey: "next", foreignKey: "slug" };
     const config: StaticQLConfig = { sources: {
@@ -1011,50 +1011,9 @@ describe("incremental relation propagation from added targets (#79)", () => {
       u: source("u", ["name"]),
     } };
     const row = { slug: "one", rel: ["middle"] };
-    const fixture = await createFixture(config, { s: [row], t: [], u: [] });
-    const query = [{ source: "s", field: "r.x.name", value: "deep", slugs: [] }];
-    const end = { slug: "end", name: "deep" };
-    writeRecord(fixture.root, "u", end);
-    await fixture.staticql.getIndexer().updateIndexesForFiles([
-      { status: "A", source: "u", slug: "end", fields: { slug: "end", name: ["deep"] } },
-    ]);
-    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [], u: [end] }, query, true);
-
-    const middle = { slug: "middle", next: ["end"], name: "middle" };
-    writeRecord(fixture.root, "t", middle);
-    await fixture.staticql.getIndexer().updateIndexesForFiles([
-      { status: "A", source: "t", slug: "middle", fields: { slug: "middle", next: ["end"], name: ["middle"] } },
-    ]);
-    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [middle], u: [end] }, query, true);
-
-    const changedMiddle = { ...middle, name: "middle changed" };
-    writeRecord(fixture.root, "t", changedMiddle);
-    await fixture.staticql.getIndexer().updateIndexesForFiles([{
-      status: "M", source: "t", slug: "middle",
-      fields: { slug: "middle", next: ["end"], name: ["middle changed"] },
-      oldFields: { slug: "middle", next: ["end"], name: ["middle"] },
-    }]);
-    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [changedMiddle], u: [end] }, query, true);
-
-    const changedEnd = { slug: "end", name: "deeper" };
-    writeRecord(fixture.root, "u", changedEnd);
-    await fixture.staticql.getIndexer().updateIndexesForFiles([{
-      status: "M", source: "u", slug: "end",
-      fields: { slug: "end", name: ["deeper"] }, oldFields: { slug: "end", name: ["deep"] },
-    }]);
-    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [changedMiddle], u: [changedEnd] }, query, true);
-
-    deleteRecord(fixture.root, "t", "middle");
-    await fixture.staticql.getIndexer().updateIndexesForFiles([
-      { status: "D", source: "t", slug: "middle", fields: { slug: "middle", next: ["end"], name: ["middle changed"] } },
-    ]);
-    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [], u: [changedEnd] }, query, true);
-
-    deleteRecord(fixture.root, "u", "end");
-    await fixture.staticql.getIndexer().updateIndexesForFiles([
-      { status: "D", source: "u", slug: "end", fields: { slug: "end", name: ["deeper"] } },
-    ]);
-    await expectMatchesFull(fixture.staticql, config, { s: [row], t: [], u: [] }, query, true);
+    await expect(createFixture(config, { s: [row], t: [], u: [] })).rejects.toThrow(
+      '[s] index path "r.x.name" traverses relation "x" on related source "t"; only one-hop relation paths ("<relation>.<field>") are supported'
+    );
   });
 
   it("matches full indexes for an ordinary nested target field through A/M/D (C3b)", async () => {

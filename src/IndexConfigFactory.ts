@@ -52,6 +52,8 @@ export class IndexConfigFactory {
             `[${sourceName}] index depth ${depth} for field "${fieldName}" is out of range (1-10)`
           );
 
+        this.validateRelationIndexPath(sourceName, fieldName, source, allSources);
+
         indexes[fieldName] = {
           dir: getIndexDir(sourceName, fieldName),
           depth,
@@ -99,6 +101,26 @@ export class IndexConfigFactory {
     }
 
     return indexes;
+  }
+
+  private validateRelationIndexPath(
+    sourceName: string,
+    fieldName: string,
+    source: IndexConfigInput,
+    allSources: Record<string, IndexConfigInput>
+  ): void {
+    const segments = fieldName.split(".");
+    if (segments.length < 2) return;
+    if (!Object.hasOwn(source.relations ?? {}, segments[0])) return;
+
+    const relation = source.relations![segments[0]];
+    const target = allSources[relation.to];
+    if (!target) return;
+    if (!Object.hasOwn(target.relations ?? {}, segments[1])) return;
+
+    throw new Error(
+      `[${sourceName}] index path "${fieldName}" traverses relation "${segments[1]}" on related source "${relation.to}"; only one-hop relation paths ("<relation>.<field>") are supported`
+    );
   }
 
   /**
