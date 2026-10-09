@@ -50,6 +50,66 @@ type IncrementalRelationData = Map<
   Map<string, { A: IncrementalView; D: IncrementalView }>
 >;
 
+const PSEUDO_FIELDS = Symbol("pseudoFields");
+
+class IndexValueTerminal {
+  constructor(readonly values: string[]) {}
+}
+
+function resolveIndexValues(
+  record: SourceRecord,
+  field: string,
+  relations: RSC["relations"]
+): string[] {
+  const segments = field.split(".");
+  const normalize = (value: unknown): string[] =>
+    (Array.isArray(value) ? value.flat(Infinity) : [value])
+      .filter((item) => item !== undefined && item !== null)
+      .map((item) => String(item));
+  let values: any[] = [record];
+
+  for (let offset = 0; offset < segments.length; offset++) {
+    const remainingPath = segments.slice(offset).join(".");
+    const preparePseudo = (node: any): any => {
+      if (node instanceof IndexValueTerminal || node == null || typeof node !== "object") {
+        return node;
+      }
+      const pseudoFields = (node as SourceRecord & {
+        [PSEUDO_FIELDS]?: Record<string, unknown>;
+      })[PSEUDO_FIELDS];
+      const isRootRelation = node === record && offset === 0 &&
+        Object.prototype.hasOwnProperty.call(relations ?? {}, segments[0]);
+      if (
+        !pseudoFields || isRootRelation ||
+        resolveField(node, remainingPath).length > 0 ||
+        !Object.prototype.hasOwnProperty.call(pseudoFields, remainingPath)
+      ) return node;
+      return new IndexValueTerminal(normalize(pseudoFields[remainingPath]));
+    };
+
+    values = values.map((value) => {
+      if (value instanceof IndexValueTerminal) return value;
+      return Array.isArray(value)
+        ? value.map((item) => preparePseudo(item))
+        : preparePseudo(value);
+    });
+
+    const segment = segments[offset];
+    values = values.map((value) => {
+      if (value instanceof IndexValueTerminal) return value;
+      return Array.isArray(value)
+        ? value.map((item) => item instanceof IndexValueTerminal ? item : item?.[segment])
+        : value?.[segment];
+    }).flat().filter((value) => value instanceof IndexValueTerminal || (value !== undefined && value !== null));
+  }
+
+  return values.flat(Infinity).flatMap((value) =>
+    value instanceof IndexValueTerminal
+      ? value.values
+      : value === undefined || value === null ? [] : [String(value)]
+  );
+}
+
 /**
  * IndexBuilder: handles full and incremental index building.
  */
@@ -83,10 +143,7 @@ export class IndexBuilder {
 
       const records = await this.buildRecords(rsc);
 
-      const prefixes = this.getPrefixIndexPathByResolvedRecords(
-        records,
-        rsc.indexes
-      );
+      const prefixes = this.getPrefixIndexPathByResolvedRecords(records, rsc);
 
       const entries = this.createIndexLines(records, prefixes, rsc);
 
@@ -167,11 +224,8 @@ export class IndexBuilder {
       )];
     };
 
-    // Only original modifications and deletions can invalidate existing
-    // relations. Additions deliberately remain outside this propagation.
+    // Any changed target can affect the resolved relation of existing rows.
     for (const entry of originalEntries) {
-      if (entry.status !== "M" && entry.status !== "D") continue;
-
       for (const sourceRsc of allSourceConfigs) {
         for (const rel of Object.values(sourceRsc.relations ?? {})) {
           if (isThroughRelation(rel)) {
@@ -338,13 +392,24 @@ export class IndexBuilder {
     }
 
     function makePseudo(diff: DiffEntry): SourceRecord {
-      return { slug: diff.slug, ...diff.fields } as SourceRecord;
+      const record = { slug: diff.slug, ...diff.fields } as SourceRecord;
+      Object.defineProperty(record, PSEUDO_FIELDS, {
+        value: diff.fields ?? {},
+        enumerable: true,
+      });
+      return record;
     }
 
     // Preserve the existing missing-relation errors independently of the
     // complete datasets used below. Only changed sources need resolving.
     const legacy = new Map(changedRows);
-    for (const [sourceName, data] of changedRows) {
+    for (const [sourceName, allData] of changedRows) {
+      const originalSlugs = originalSlugsBySource.get(sourceName);
+      if (!originalSlugs) continue;
+      const data = new Set(
+        [...allData].filter((row) => originalSlugs.has(row.slug))
+      );
+      if (!data.size) continue;
       const rsc = this.resolver.resolveOne(sourceName);
       const relations = rsc.relations ?? [];
 
@@ -612,10 +677,7 @@ export class IndexBuilder {
           recordStatuses.get(row) === status
         );
         if (!statusRecords.length) continue;
-        const prefixes = this.getPrefixIndexPathByResolvedRecords(
-          statusRecords,
-          rsc.indexes
-        );
+        const prefixes = this.getPrefixIndexPathByResolvedRecords(statusRecords, rsc);
         const entries = this.createIndexLines(statusRecords, prefixes, rsc, status);
 
         for await (const [path, contents] of Array.from(entries)) {
@@ -788,15 +850,16 @@ export class IndexBuilder {
    */
   private getPrefixIndexPathByResolvedRecords(
     records: SourceRecord[],
-    indexes: NonNullable<RSC["indexes"]>
+    rsc: RSC
   ): Map<string, Map<string, Set<string>>> {
+    const indexes = rsc.indexes!;
     const indexFields = Array.from(new Set(Object.keys(indexes)));
     const prefixes = new Map<string, Map<string, Set<string>>>();
 
     for (const record of records) {
       const paths = new Map<string, Set<string>>();
       for (const field of indexFields) {
-        let fieldValues = resolveField(record, field);
+        let fieldValues = resolveIndexValues(record, field, rsc.relations);
 
         // For custom indexers, resolveField returns empty because the field
         // doesn't exist on the record. Use the custom indexer callback instead.
@@ -980,7 +1043,7 @@ export class IndexBuilder {
     > = new Map();
 
     for (const field of indexFields) {
-      let valueArr = resolveField(record, field);
+      let valueArr = resolveIndexValues(record, field, rsc.relations);
 
       let valueSlugs = new Array(valueArr.length).fill(record.slug);
       const ref = field.split(".").shift() ?? "";
