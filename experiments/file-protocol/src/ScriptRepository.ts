@@ -30,10 +30,14 @@ export class ScriptRepository implements StorageRepository {
   private manifestLoad?: Promise<void>;
   private manifestPaths?: Set<string>;
 
-  constructor(baseUrl: string, mode: Mode, absence: AbsencePolicy = "strict") {
+  constructor(baseUrl: string, mode: Mode, absence: AbsencePolicy = "lenient") {
     this.baseUrl = baseUrl.replace(/\/+$/, "") + "/";
     this.mode = mode;
     this.absence = absence;
+  }
+
+  get absencePolicy(): AbsencePolicy {
+    return this.absence;
   }
 
   setResolver(resolver: SourceConfigResolver): void {

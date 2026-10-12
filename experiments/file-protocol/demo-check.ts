@@ -5,46 +5,96 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { BOOTSTRAP_LOAD_FAILURE_NOTE, generateDemo } from "./demo.js";
+import { ScriptRepository } from "./src/ScriptRepository.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const chromiumPath = "/usr/bin/chromium";
 const scratchParent = path.join(repoRoot, ".cache");
 
 async function main(): Promise<void> {
+  assert.equal(new ScriptRepository("file:///x/", "B").absencePolicy, "lenient",
+    "ScriptRepository should default to lenient absence handling");
+  pass("ScriptRepository の既定 policy: lenient");
   await fs.access(chromiumPath);
   await fs.mkdir(scratchParent, { recursive: true });
   const scratchRoot = await fs.mkdtemp(path.join(scratchParent, "file-protocol-demo-check-"));
-  const outsideRoot = await fs.mkdtemp(path.join(os.tmpdir(), "staticql-demo-check-outside-"));
+  let outsideRoot: string | undefined;
   try {
+    outsideRoot = await fs.mkdtemp(path.join(os.tmpdir(), "staticql-demo-check-outside-"));
+    assert.ok(outsideRoot, "external symlink test directory should be created");
     const normalOutDir = path.join(scratchRoot, "normal");
     const generated = await generateDemo(normalOutDir);
+    assert.equal(generated.logicalPaths.includes("index/herbs.name/30b4/_index.jsonl"), true,
+      "30b4 index shard should be present in the generated fixture");
+    assert.equal(await pathExists(path.join(normalOutDir, "manifest.js")), false,
+      "default generation should omit manifest.js");
     const normalDom = await inspectPage(path.join(normalOutDir, "index.html"), true);
-    assertSuccessfulDemo(normalDom, generated.expected.logicalFileCount, "normal output");
+    assertSuccessfulDemo(normalDom, generated.expected.logicalFileCount, "normal output", "lenient");
     pass("通常出力: 3 クエリ一致、各クエリが一部ファイルのみ取得");
 
-    const copiedOutDir = path.join(os.tmpdir(), `staticql-file-protocol-copy-${process.pid}-${Date.now()}`);
+    const copiedRoot = await fs.mkdtemp(path.join(os.tmpdir(), "staticql-file-protocol-copy-"));
     try {
+      const copiedOutDir = path.join(copiedRoot, "demo");
       await fs.cp(normalOutDir, copiedOutDir, { recursive: true, errorOnExist: true });
       const copiedDom = await inspectPage(path.join(copiedOutDir, "index.html"), true);
-      assertSuccessfulDemo(copiedDom, generated.expected.logicalFileCount, "copied output");
+      assertSuccessfulDemo(copiedDom, generated.expected.logicalFileCount, "copied output", "lenient");
       pass("別の場所へのコピー: file:// で同じ 3 クエリが一致");
     } finally {
-      await fs.rm(copiedOutDir, { recursive: true, force: true });
+      await fs.rm(copiedRoot, { recursive: true, force: true });
     }
 
-    const indexLogicalPath = generated.logicalPaths.find((item) => item === "index/herbs.name/_prefixes.jsonl");
-    assert.ok(indexLogicalPath, "herbs.name クエリが使用する manifest 掲載 index ファイルが必要です");
-    const missingIndexPayload = path.join(normalOutDir, `${indexLogicalPath}.js`);
-    await fs.rm(missingIndexPayload);
-    const missingIndexDom = await inspectPage(path.join(normalOutDir, "index.html"), true);
-    assertErrorKind(missingIndexDom, "other", "manifest に掲載された index payload の欠落");
-    assert.match(missingIndexDom, /file:\/\//, "失敗した payload URL が画面に表示されること");
+    const missingShardDir = path.join(scratchRoot, "missing-shard");
+    await fs.cp(normalOutDir, missingShardDir, { recursive: true, errorOnExist: true });
+    const missingShardPath = path.join(missingShardDir, "index/herbs.name/30b4/_index.jsonl.js");
+    assert.equal(await pathExists(missingShardPath), true, "C5 index shard deletion target should exist");
+    await fs.rm(missingShardPath);
+    const missingShardDom = await inspectPage(path.join(missingShardDir, "index.html"), true);
+    assertLenientMissingShard(missingShardDom);
+    pass("lenient で必要な index shard が欠落: 不一致、例外行なし、全体は成功にならない");
+
+    const malformedDir = path.join(scratchRoot, "malformed-payload");
+    await fs.cp(normalOutDir, malformedDir, { recursive: true, errorOnExist: true });
+    const malformedLogicalPath = "content/herbs/arctium-lappa.md";
+    assert.equal(generated.logicalPaths.includes(malformedLogicalPath), true, "C5 malformed payload target should exist");
+    const malformedPayloadPath = path.join(malformedDir, `${malformedLogicalPath}.js`);
+    assert.equal(await pathExists(malformedPayloadPath), true, "C5 malformed payload file should exist");
+    await fs.writeFile(malformedPayloadPath, "this is not valid JavaScript !!!\n", "utf8");
+    const malformedDom = await inspectPage(path.join(malformedDir, "index.html"), true);
+    assertErrorKind(malformedDom, "other", "lenient 構文エラー payload");
+    pass("lenient でも構文エラー payload はその他のエラーとして表示");
+
+    const manifestOutDir = path.join(scratchRoot, "manifest");
+    const manifestGenerated = await generateDemo(manifestOutDir, { manifest: true });
+    assert.equal(await pathExists(path.join(manifestOutDir, "manifest.js")), true,
+      "manifest option should generate manifest.js");
+    const manifestDom = await inspectPage(path.join(manifestOutDir, "index.html"), true);
+    assertSuccessfulDemo(manifestDom, manifestGenerated.expected.logicalFileCount, "manifest output", "manifest");
+    pass("manifest オプション: manifest.js を生成し、3 クエリが一致");
+
+    const manifestPayloadDir = path.join(scratchRoot, "manifest-missing-payload");
+    await fs.cp(manifestOutDir, manifestPayloadDir, { recursive: true, errorOnExist: true });
+    const manifestIndexPath = "index/herbs.name/_prefixes.jsonl.js";
+    assert.equal(manifestGenerated.logicalPaths.includes(manifestIndexPath.slice(0, -3)), true,
+      "manifest payload deletion target should be listed");
+    const manifestPayloadPath = path.join(manifestPayloadDir, manifestIndexPath);
+    assert.equal(await pathExists(manifestPayloadPath), true, "manifest payload deletion target should exist");
+    await fs.rm(manifestPayloadPath);
+    const missingManifestPayloadDom = await inspectPage(path.join(manifestPayloadDir, "index.html"), true);
+    assertErrorKind(missingManifestPayloadDom, "other", "manifest 掲載 payload の欠落");
+    assert.match(missingManifestPayloadDom, /file:\/\//, "failed payload URL should be shown");
     pass("manifest 掲載 payload の欠落: その他のエラーとして表示");
 
-    await fs.rm(path.join(normalOutDir, "manifest.js"));
-    const missingManifestDom = await inspectPage(path.join(normalOutDir, "index.html"), true);
+    const missingManifestDir = path.join(scratchRoot, "missing-manifest");
+    await fs.cp(manifestOutDir, missingManifestDir, { recursive: true, errorOnExist: true });
+    const manifestFilePath = path.join(missingManifestDir, "manifest.js");
+    assert.equal(await pathExists(manifestFilePath), true, "manifest deletion target should exist");
+    await fs.rm(manifestFilePath);
+    const missingManifestDom = await inspectPage(path.join(missingManifestDir, "index.html"), true);
     assertErrorKind(missingManifestDom, "not-found", "manifest.js の欠落");
     pass("manifest.js の欠落: 不在として表示");
+
+    await verifyCli(scratchRoot);
+    pass("CLI: --manifest 両引数順、既定では manifest なし、未知フラグ拒否");
 
     const indexOnlyDir = await fs.mkdtemp(path.join(os.tmpdir(), "staticql-demo-index-only-"));
     try {
@@ -56,8 +106,7 @@ async function main(): Promise<void> {
       await fs.rm(indexOnlyDir, { recursive: true, force: true });
     }
 
-    await fs.cp(await generateDemo(path.join(scratchRoot, "expected-case")).then((value) => value.outDir),
-      path.join(scratchRoot, "expected-case-copy"), { recursive: true });
+    await fs.cp(normalOutDir, path.join(scratchRoot, "expected-case-copy"), { recursive: true });
     const expectedCaseDir = path.join(scratchRoot, "expected-case-copy");
     await fs.rm(path.join(expectedCaseDir, "expected.js"));
     const missingExpectedDom = await inspectPage(path.join(expectedCaseDir, "index.html"), true);
@@ -73,7 +122,61 @@ async function main(): Promise<void> {
     console.log("demo-check: すべての確認に合格しました。");
   } finally {
     await fs.rm(scratchRoot, { recursive: true, force: true });
-    await fs.rm(outsideRoot, { recursive: true, force: true });
+    if (outsideRoot) await fs.rm(outsideRoot, { recursive: true, force: true });
+  }
+}
+
+async function verifyCli(scratchRoot: string): Promise<void> {
+  const demoPath = path.join(repoRoot, "experiments/file-protocol/demo.ts");
+  const positionalFirst = path.join(scratchRoot, "cli-positional-first");
+  const flagFirst = path.join(scratchRoot, "cli-flag-first");
+  const defaultMode = path.join(scratchRoot, "cli-default");
+  const unknownFlag = path.join(scratchRoot, "cli-unknown-flag");
+
+  const positionalResult = await runDemoCli([demoPath, positionalFirst, "--manifest"]);
+  assert.equal(positionalResult.code, 0, `CLI positional-first failed: ${positionalResult.stderr}`);
+  assert.equal(await pathExists(path.join(positionalFirst, "manifest.js")), true,
+    "CLI positional-first should generate manifest.js");
+
+  const flagResult = await runDemoCli([demoPath, "--manifest", flagFirst]);
+  assert.equal(flagResult.code, 0, `CLI flag-first failed: ${flagResult.stderr}`);
+  assert.equal(await pathExists(path.join(flagFirst, "manifest.js")), true,
+    "CLI flag-first should generate manifest.js");
+
+  const defaultResult = await runDemoCli([demoPath, defaultMode]);
+  assert.equal(defaultResult.code, 0, `CLI default mode failed: ${defaultResult.stderr}`);
+  assert.equal(await pathExists(path.join(defaultMode, "manifest.js")), false,
+    "CLI without --manifest should not generate manifest.js");
+
+  const invalidResult = await runDemoCli([demoPath, unknownFlag, "--unknown"]);
+  assert.notEqual(invalidResult.code, 0, "CLI unknown flag should exit non-zero");
+  assert.match(invalidResult.stderr, /使用方法:/, "CLI unknown flag should print usage");
+  assert.equal(await pathExists(unknownFlag), false, "CLI unknown flag should not create output");
+}
+
+async function runDemoCli(args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  const child = spawn("npx", ["--no-install", "tsx", ...args], {
+    cwd: repoRoot,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, npm_config_offline: "true" },
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+  child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+  return await new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return false;
+    throw error;
   }
 }
 
@@ -97,8 +200,22 @@ async function verifySymlinkEscapeIsRejected(scratchRoot: string, outsideRoot: s
   assert.equal(await fs.readFile(sentinelPath, "utf8"), "outside data\n");
 }
 
-function assertSuccessfulDemo(dom: string, logicalFileCount: number, description: string): void {
+function assertSuccessfulDemo(
+  dom: string,
+  logicalFileCount: number,
+  description: string,
+  policy: "lenient" | "manifest",
+): void {
   assert.match(dom, /id="status"[^>]*data-status="complete"/, `${description}: all rows should complete`);
+  const policyElement = dom.match(/<p id="absence-policy"[^>]*>([\s\S]*?)<\/p>/);
+  assert.ok(policyElement, `${description}: absence policy should be displayed`);
+  assert.equal(attribute(policyElement[0], "data-policy"), policy,
+    `${description}: policy data attribute should identify ${policy}`);
+  assert.equal(policyElement[1], `不在判定: ${policy}`,
+    `${description}: visible policy should identify ${policy}`);
+  const warning = dom.match(/<p id="absence-warning">([\s\S]*?)<\/p>/)?.[1] ?? "";
+  assert.equal(warning.includes("読み込めなかったファイルは不在とみなされる"), policy === "lenient",
+    `${description}: lenient warning visibility should match the active policy`);
   const resultsBody = dom.match(/<tbody id="results">([\s\S]*?)<\/tbody>/)?.[1];
   assert.ok(resultsBody, `${description}: results table body should exist`);
   const rows = resultsBody.match(/<tr\b[^>]*>/g) ?? [];
@@ -109,6 +226,19 @@ function assertSuccessfulDemo(dom: string, logicalFileCount: number, description
     assert.ok(Number.isInteger(fileCount) && fileCount > 0, `${description}: query row ${index + 1} should load files`);
     assert.ok(fileCount < logicalFileCount, `${description}: query row ${index + 1} should not load every logical file`);
   }
+}
+
+function assertLenientMissingShard(dom: string): void {
+  assert.match(dom, /id="status"[^>]*data-status="error"/,
+    "missing required shard should prevent the overall run from completing successfully");
+  const resultsBody = dom.match(/<tbody id="results">([\s\S]*?)<\/tbody>/)?.[1];
+  assert.ok(resultsBody, "missing shard: results table body should exist");
+  const rows = resultsBody.match(/<tr\b[^>]*>/g) ?? [];
+  assert.equal(rows.length, 3, "missing shard should still render all three query rows");
+  assert.equal(attribute(rows[0], "data-match"), "false", "first query should not match after its shard is removed");
+  assert.equal(attribute(rows[0], "data-status"), "failed", "missing shard should render a failed result row");
+  assert.equal(rows.some((row) => attribute(row, "data-error-kind") !== undefined), false,
+    "lenient shard absence should not render an exception row");
 }
 
 function assertBootstrapLoadError(dom: string, fileName: "expected.js" | "demo-entry.js"): void {
@@ -211,7 +341,7 @@ async function inspectPage(indexPath: string, autorun: boolean): Promise<string>
       "--disable-dev-shm-usage",
       "--remote-debugging-port=0",
       `--user-data-dir=${profile}`,
-    ], { stdio: ["ignore", "ignore", "pipe"] });
+    ], { detached: true, stdio: ["ignore", "ignore", "pipe"] });
     child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
     const debuggerUrl = await waitForDevTools(child, () => stderr);
     const endpoint = new URL(debuggerUrl);
@@ -259,15 +389,22 @@ async function inspectPage(indexPath: string, autorun: boolean): Promise<string>
     return dom;
   } finally {
     cdp?.close();
-    if (child && child.exitCode === null) {
-      child.kill("SIGTERM");
+    if (child?.pid) {
+      signalProcessGroup(child.pid, "SIGTERM");
       await waitForExit(child, 2000);
-      if (child.exitCode === null) {
-        child.kill("SIGKILL");
-        await waitForExit(child, 2000);
-      }
+      signalProcessGroup(child.pid, "SIGKILL");
+      await waitForExit(child, 2000);
     }
     await fs.rm(profile, { recursive: true, force: true });
+  }
+}
+
+function signalProcessGroup(processId: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-processId, signal);
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ESRCH") return;
+    throw error;
   }
 }
 

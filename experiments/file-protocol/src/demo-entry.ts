@@ -2,7 +2,7 @@ import { defineStaticQL, type StaticQLConfig } from "../../../src/index.js";
 import type { StaticQL } from "../../../src/StaticQL.js";
 import { NotFoundError } from "../../../src/repository/errors.js";
 import type { SourceRecord } from "../../../src/types.js";
-import { ScriptRepository } from "./ScriptRepository.js";
+import { ScriptRepository, type AbsencePolicy } from "./ScriptRepository.js";
 import type { DemoExpected, QueryInputs } from "../demo.js";
 
 declare global {
@@ -29,6 +29,8 @@ window.__sq = {
 
 const environment = requireElement("environment");
 environment.textContent = `${navigator.userAgent} — protocol: ${location.protocol}`;
+const absenceDisplay = requireElement("absence-policy");
+const absenceWarning = requireElement("absence-warning");
 
 const runButton = requireElement<HTMLButtonElement>("run");
 runButton.addEventListener("click", () => void runQueries().catch(showFatalError));
@@ -70,6 +72,12 @@ async function runQueries(): Promise<void> {
   status.dataset.status = "running";
   status.textContent = "クエリを実行しています…";
 
+  const absenceValue = document.documentElement.dataset.absence;
+  if (absenceValue !== "lenient" && absenceValue !== "manifest") {
+    throw new Error(`不在判定方式が不正です: ${absenceValue ?? "未指定"}`);
+  }
+  const absence = absenceValue as AbsencePolicy;
+
   if (!window.__sqExpected) {
     status.dataset.status = "error";
     status.textContent = "期待値ファイルを読み込めませんでした。";
@@ -81,8 +89,15 @@ async function runQueries(): Promise<void> {
   let allMatched = true;
   for (const query of queries) {
     status.textContent = `${query.label} を実行しています…`;
-    const repository = new ScriptRepository(new URL("./", location.href).href, "B", "manifest");
+    const repository = new ScriptRepository(new URL("./", location.href).href, "B", absence);
     activeRepository = repository;
+    if (query === queries[0]) {
+      absenceDisplay.dataset.policy = repository.absencePolicy;
+      absenceDisplay.textContent = `不在判定: ${repository.absencePolicy}`;
+      absenceWarning.textContent = repository.absencePolicy === "lenient"
+        ? "読み込めなかったファイルは不在とみなされるため、実在するのに読めない場合も結果が欠落することがあります"
+        : "";
+    }
     const staticql = defineStaticQL(config)({ repository });
     try {
       const result = await query.execute(staticql, window.__sqExpected.inputs);
