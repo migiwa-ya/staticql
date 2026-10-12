@@ -34,7 +34,10 @@ const contentDir = path.join(repoRoot, "tests/content");
 const configPath = path.join(repoRoot, "tests/staticql.config.json");
 const defaultOutDir = path.join(repoRoot, ".cache/file-protocol-demo");
 
-export async function generateDemo(outDir = defaultOutDir): Promise<DemoGeneration> {
+export async function generateDemo(
+  outDir = defaultOutDir,
+  options: { manifest?: boolean } = {},
+): Promise<DemoGeneration> {
   const safeOutDir = await validateOutputDirectory(outDir);
   await fs.mkdir(safeOutDir, { recursive: true });
 
@@ -74,11 +77,13 @@ export async function generateDemo(outDir = defaultOutDir): Promise<DemoGenerati
       );
     }
 
-    await fs.writeFile(
-      path.join(safeOutDir, "manifest.js"),
-      `window.__sq.registerManifest(${JSON.stringify(files)});\n`,
-      "utf8",
-    );
+    if (options.manifest === true) {
+      await fs.writeFile(
+        path.join(safeOutDir, "manifest.js"),
+        `window.__sq.registerManifest(${JSON.stringify(files)});\n`,
+        "utf8",
+      );
+    }
     await fs.writeFile(
       path.join(safeOutDir, "expected.js"),
       `window.__sqExpected = ${JSON.stringify(expected)};\n`,
@@ -94,7 +99,7 @@ export async function generateDemo(outDir = defaultOutDir): Promise<DemoGenerati
       format: "iife",
       target: "es2020",
     });
-    await writeIndexHtml(safeOutDir, config);
+    await writeIndexHtml(safeOutDir, config, options.manifest === true ? "manifest" : "lenient");
 
     return { outDir: safeOutDir, expected, logicalPaths: files };
   } finally {
@@ -189,10 +194,10 @@ async function listFiles(root: string, base = root): Promise<string[]> {
   return result.sort();
 }
 
-async function writeIndexHtml(outDir: string, config: StaticQLConfig): Promise<void> {
+async function writeIndexHtml(outDir: string, config: StaticQLConfig, absence: "lenient" | "manifest"): Promise<void> {
   const configAttribute = escapeAttribute(JSON.stringify(config));
   const html = `<!doctype html>
-<html lang="ja" data-config="${configAttribute}">
+<html lang="ja" data-config="${configAttribute}" data-absence="${absence}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -210,6 +215,8 @@ async function writeIndexHtml(outDir: string, config: StaticQLConfig): Promise<v
   <main>
     <h1>StaticQL file:// デモ</h1>
     <p id="environment"></p>
+    <p id="absence-policy"></p>
+    <p id="absence-warning"></p>
     <p>このページは file:// から静的ファイルを読み込みます。各クエリで取得したファイルと FsRepository の結果を確認できます。</p>
     <button id="run" type="button">実行</button>
     <p id="status" data-status="ready" aria-live="polite">「実行」を押してください。</p>
@@ -232,9 +239,22 @@ function escapeAttribute(value: string): string {
 }
 
 async function main(): Promise<void> {
-  if (process.argv.length > 3) throw new Error("使用方法: npx --no-install tsx experiments/file-protocol/demo.ts [outDir]");
-  const target = process.argv[2] ? path.resolve(repoRoot, process.argv[2]) : defaultOutDir;
-  const result = await generateDemo(target);
+  const usage = "使用方法: npx --no-install tsx experiments/file-protocol/demo.ts [outDir] [--manifest]";
+  let target: string | undefined;
+  let manifest = false;
+  for (const argument of process.argv.slice(2)) {
+    if (argument === "--manifest") {
+      if (manifest) throw new Error(usage);
+      manifest = true;
+    } else if (argument.startsWith("-")) {
+      throw new Error(usage);
+    } else if (target === undefined) {
+      target = argument;
+    } else {
+      throw new Error(usage);
+    }
+  }
+  const result = await generateDemo(target ? path.resolve(repoRoot, target) : defaultOutDir, { manifest });
   console.log(`デモを生成しました: ${path.join(result.outDir, "index.html")}`);
 }
 
