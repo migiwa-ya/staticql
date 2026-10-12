@@ -70,7 +70,8 @@
   },
   "bin": {
     "staticql-gen-index": "./dist/cli/generate-index.js",
-    "staticql-gen-types": "./dist/cli/generate-types.js"
+    "staticql-gen-types": "./dist/cli/generate-types.js",
+    "staticql-gen-script": "./dist/cli/generate-script.js"
   },
   "files": [
     "dist",
