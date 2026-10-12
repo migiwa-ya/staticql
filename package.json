@@ -24,6 +24,11 @@
       "types": "./dist/src/repository/FetchRepository.d.ts",
       "default": "./dist/src/repository/FetchRepository.js"
     },
+    "./repo/script": {
+      "import": "./dist/src/repository/ScriptRepository.js",
+      "types": "./dist/src/repository/ScriptRepository.d.ts",
+      "default": "./dist/src/repository/ScriptRepository.js"
+    },
     "./diff": {
       "import": "./dist/src/diff/extractDiff.js",
       "types": "./dist/src/diff/extractDiff.d.ts",
