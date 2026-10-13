@@ -134,7 +134,14 @@ export class ScriptRepository implements StorageRepository {
   }
 
   private async loadManifest(): Promise<void> {
-    this.manifestLoad ??= this.loadScript("manifest.js", "__manifest__", true).then(() => undefined);
+    this.manifestLoad ??= this.loadScript("manifest.js", "__manifest__", true)
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        if (error instanceof NotFoundError) {
+          throw new Error('Unable to load manifest.js: it is required when absence is "manifest"', { cause: error });
+        }
+        throw error;
+      });
     await this.manifestLoad;
     if (!this.manifestPaths) throw new Error("manifest.js loaded without registering its path list");
   }
