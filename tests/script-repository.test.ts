@@ -131,6 +131,53 @@ describe("ScriptRepository", () => {
     await expect(exists).resolves.toBe(false);
   });
 
+  it.each(["readFile", "exists", "listFiles"] as const)(
+    "rejects %s when the required manifest fails and keeps the failure cached",
+    async (method) => {
+      const repository = new ScriptRepository("file:///data/", { absence: "manifest" });
+      repository.setResolver(new SourceConfigResolver((staticqlConfig as StaticQLConfig).sources));
+      const invoke = () => {
+        if (method === "readFile") return repository.readFile("content/herbs/arctium-lappa.md");
+        if (method === "exists") return repository.exists("content/herbs/arctium-lappa.md");
+        return repository.listFiles("content/herbs/*.md");
+      };
+
+      const first = invoke();
+      expect(browser.scripts).toHaveLength(1);
+      failToLoad(browser.scripts[0]!);
+
+      await expect(first).rejects.toMatchObject({
+        message: expect.stringContaining("manifest.js"),
+        cause: expect.any(NotFoundError),
+      });
+      await expect(first).rejects.not.toBeInstanceOf(NotFoundError);
+
+      const scriptCount = browser.scripts.length;
+      const second = invoke();
+      await expect(second).rejects.toThrow("manifest.js");
+      await expect(second).rejects.not.toBeInstanceOf(NotFoundError);
+      expect(browser.scripts).toHaveLength(scriptCount);
+    }
+  );
+
+  it("keeps the existing error when manifest.js loads without registering a manifest", async () => {
+    const repository = new ScriptRepository("file:///data/", { absence: "manifest" });
+    const content = repository.readFile("content/herbs/arctium-lappa.md");
+    browser.scripts[0]!.onload!();
+
+    await expect(content).rejects.toThrow("did not register __manifest__");
+    await expect(content).rejects.not.toBeInstanceOf(NotFoundError);
+  });
+
+  it("keeps a manifest syntax error as an ordinary error", async () => {
+    const repository = new ScriptRepository("file:///data/", { absence: "manifest" });
+    const content = repository.readFile("content/herbs/arctium-lappa.md");
+    dispatchScriptError(browser.scripts[0]!);
+
+    await expect(content).rejects.toThrow("syntax error");
+    await expect(content).rejects.not.toBeInstanceOf(NotFoundError);
+  });
+
   it("loads a manifest once and avoids requesting paths absent from it", async () => {
     const repository = new ScriptRepository("file:///data/", { absence: "manifest" });
     const missing = repository.readFile("missing.md");
