@@ -22,7 +22,7 @@ import { defineStaticQL, type StaticQLConfig } from "../../src/index.js";
 import { FsRepository } from "../../src/repository/FsRepository.js";
 import { executeC4Query, executeScenarios, type QueryInputs } from "./src/scenarios.js";
 
-const projectRoot = "/home/nagisa/projects/staticql-issue-41-file-protocol-verification";
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const experimentRoot = `${projectRoot}/experiments/file-protocol`;
 const chromiumPath = "/usr/bin/chromium";
 const sampleCount = 5;
